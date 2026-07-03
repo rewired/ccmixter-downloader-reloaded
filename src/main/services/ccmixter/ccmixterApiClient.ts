@@ -1,4 +1,9 @@
-import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING, type MetadataSourceType, type TrackFile, type TrackFileKind } from '../../../shared/domain';
+import {
+  RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
+  withDownloadCandidateClassification,
+  type MetadataSourceType,
+  type TrackFile
+} from '../../../shared/domain';
 import type {
   CcmixterApiClientOptions,
   CcmixterApiQuery,
@@ -9,7 +14,6 @@ import type {
 const DEFAULT_QUERY_API_URL = 'https://ccmixter.org/api/query';
 const DEFAULT_TIMEOUT_MS = 10_000;
 export const ARTIST_CATALOG_QUERY_LIMIT = 100;
-const AUDIO_OR_ARCHIVE_EXTENSIONS = new Set(['mp3', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'm4a', 'zip']);
 
 export class CcmixterApiClient {
   private readonly baseUrl: string;
@@ -237,33 +241,14 @@ export function buildTrackFile(
 ): TrackFile {
   const extension = extensionFromFilename(filename);
 
-  return {
+  return withDownloadCandidateClassification({
     originalFilename: filename,
-    fileKind: inferFileKind(filename),
+    fileKind: 'unknown',
     extension: extension ?? 'unknown',
     downloadUrl,
     metadataSource,
     warnings: extension ? warnings : [...warnings, 'File extension could not be determined.']
-  };
-}
-
-function inferFileKind(filename: string): TrackFileKind {
-  const lower = filename.toLowerCase();
-
-  if (lower.endsWith('.zip')) {
-    return 'archive';
-  }
-
-  if (lower.includes('preview') || lower.includes('demo')) {
-    return 'preview';
-  }
-
-  const extension = extensionFromFilename(filename);
-  if (extension && AUDIO_OR_ARCHIVE_EXTENSIONS.has(extension)) {
-    return 'stem';
-  }
-
-  return 'unknown';
+  });
 }
 
 function extensionFromFilename(filename: string): string | undefined {

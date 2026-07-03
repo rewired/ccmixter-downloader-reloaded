@@ -23,6 +23,19 @@ export interface StemLibraryRoot {
 
 export type MetadataSourceType = 'api' | 'html-enriched' | 'fixture' | 'unresolved';
 
+export interface DownloadCandidateClassification {
+  role: DownloadCandidateRole;
+  format: DownloadCandidateFormat;
+  quality: DownloadCandidateQuality;
+  confidence: Confidence;
+  reasons: string[];
+  warnings: string[];
+}
+
+export type DownloadCandidateRole = 'preview' | 'stem' | 'source' | 'archive' | 'other';
+export type DownloadCandidateFormat = 'mp3' | 'flac' | 'wav' | 'aiff' | 'zip' | 'other';
+export type DownloadCandidateQuality = 'lossless' | 'lossy' | 'archive' | 'unknown';
+
 export interface TrackUpload {
   uploadId: string;
   artistName: string;
@@ -46,11 +59,13 @@ export interface TrackFile {
   originalFilename: string;
   fileKind: TrackFileKind;
   extension: string;
+  displayLabel?: string;
   sizeBytes?: number;
   downloadUrl?: string;
   qualityHint?: string;
   metadataSource: MetadataSourceType;
   zipFileHints?: string[];
+  classification?: DownloadCandidateClassification;
   warnings: string[];
 }
 

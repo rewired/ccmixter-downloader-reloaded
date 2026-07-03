@@ -256,11 +256,16 @@ describe('CcmixterResolver', () => {
 
     expect(metadata.status).toBe('resolved');
     expect(metadata.groups).toHaveLength(1);
+    expect(metadata.groups[0]?.confidence).toBe('medium');
+    expect(metadata.groups[0]?.metadataSource).toBe('html-enriched');
+    expect(metadata.groups[0]?.warnings).toContain('Preview and source files are mixed in this group.');
     expect(metadata.groups[0]?.files.map((file) => file.originalFilename)).toEqual([
       'Zutsuri_-_Haze_1.mp3',
       'Zutsuri_-_Haze.zip',
       'Zutsuri_-_Haze_1.zip'
     ]);
+    expect(metadata.groups[0]?.files.map((file) => file.classification?.role)).toEqual(['preview', 'archive', 'archive']);
+    expect(metadata.groups[0]?.files.every((file) => (file.classification?.reasons.length ?? 0) > 0)).toBe(true);
     expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze_1.mp3');
     expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze.zip');
     expect(metadata.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
@@ -291,6 +296,12 @@ describe('CcmixterResolver', () => {
     expect(htmlFetchCount).toBe(2);
     expect(metadata.uploads[0]?.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/2440');
     expect(metadata.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
+    expect(metadata.groups).toHaveLength(1);
+    expect(metadata.groups[0]?.confidence).toBe('medium');
+    expect(metadata.groups[0]?.groupingReasons).toContain('Stem/source tags or file-format hints support this group.');
+    expect(metadata.groups[0]?.files.map((file) => file.originalFilename)).toEqual([
+      'soundbitch_-_pls-crepman-grunge-90bpm.mp3'
+    ]);
     expect(plan.plannedFiles[0]?.targetRelativePath).toBe(
       'Chillheimer&Soundbitch/pls-crepman-grunge-90bpm (90 bpm)/soundbitch_-_pls-crepman-grunge-90bpm.mp3'
     );

@@ -1,10 +1,12 @@
 import {
   RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
+  fileKindFromDownloadCandidateRole,
+  classifyDownloadCandidate,
+  withDownloadCandidateClassification,
   type Confidence,
   type MetadataSourceType,
   type StemGroup,
   type TrackFile,
-  type TrackFileKind,
   type TrackUpload
 } from '../../../shared/domain';
 import type {
@@ -22,8 +24,6 @@ const FUNCTIONAL_SUFFIX_PATTERN =
 
 const STEM_HINTS = new Set(['stem', 'stems', 'source', 'sources', 'pells', 'acapella', 'a_cappella', 'instrumental', 'vocals']);
 const SOURCE_FORMAT_HINTS = new Set(['flac', 'wav', 'aif', 'aiff', 'zip', 'archive', 'multiple_formats']);
-const PREVIEW_HINTS = new Set(['preview', 'demo', 'mp3']);
-const AUDIO_EXTENSIONS = new Set(['flac', 'wav', 'aif', 'aiff', 'ogg', 'm4a', 'mp3']);
 
 interface NormalizedCandidate {
   upload: TrackUpload;
@@ -75,58 +75,18 @@ export function normalizeTitleRoot(title: string): TitleRootNormalization {
 }
 
 export function classifyTrackFile(file: TrackFile, context: FileClassificationContext): TrackFile {
-  const classification = classifyTrackFileCandidate(file, context);
-
-  return {
-    ...file,
-    fileKind: classification.fileKind,
-    warnings: [...file.warnings, ...classification.warnings].filter(unique)
-  };
+  return withDownloadCandidateClassification(file, context);
 }
 
 export function classifyTrackFileCandidate(file: TrackFile, context: FileClassificationContext): FileClassificationResult {
-  const haystack = [
-    file.originalFilename,
-    file.extension,
-    file.qualityHint,
-    context.uploadTitle,
-    context.qualityHint,
-    ...context.uploadTags
-  ]
-    .filter((value): value is string => typeof value === 'string')
-    .join(' ')
-    .toLowerCase()
-    .replace(/\s+/g, '_');
-  const tags = new Set(context.uploadTags.map(normalizeHint));
-  const extension = file.extension.toLowerCase();
-  const reasons: string[] = [];
-  const warnings: string[] = [];
-  const hasStemHint = [...STEM_HINTS].some((hint) => tags.has(hint) || haystack.includes(hint));
-  const hasSourceFormatHint = [...SOURCE_FORMAT_HINTS].some((hint) => tags.has(hint) || haystack.includes(hint));
-  const hasPreviewHint = [...PREVIEW_HINTS].some((hint) => tags.has(hint) || haystack.includes(hint));
+  const classification = classifyDownloadCandidate(file, context);
 
-  if (extension === 'zip') {
-    reasons.push('ZIP extension classified as archive.');
-    return { fileKind: 'archive', warnings, reasons };
-  }
-
-  if (hasPreviewHint && extension === 'mp3') {
-    reasons.push('MP3 with preview hint classified as preview.');
-    return { fileKind: 'preview', warnings, reasons };
-  }
-
-  if ((extension === 'flac' || extension === 'wav') && (hasStemHint || hasSourceFormatHint)) {
-    reasons.push('Lossless audio with stem/source hints classified as stem.');
-    return { fileKind: 'stem', warnings, reasons };
-  }
-
-  if (AUDIO_EXTENSIONS.has(extension) && hasStemHint) {
-    reasons.push('Audio file with stem/source hints classified as stem.');
-    return { fileKind: 'stem', warnings, reasons };
-  }
-
-  warnings.push('File candidate could not be classified confidently.');
-  return { fileKind: 'unknown', warnings, reasons };
+  return {
+    fileKind: fileKindFromDownloadCandidateRole(classification.role),
+    classification,
+    warnings: classification.warnings,
+    reasons: classification.reasons
+  };
 }
 
 function normalizeCandidate(candidate: GroupingUploadCandidate): NormalizedCandidate {
@@ -139,7 +99,9 @@ function normalizeCandidate(candidate: GroupingUploadCandidate): NormalizedCandi
     classifyTrackFile(file, {
       uploadTags: upload.tags,
       uploadTitle: upload.title,
-      qualityHint: file.qualityHint
+      fileLabel: file.displayLabel,
+      qualityHint: file.qualityHint,
+      zipFileHints: file.zipFileHints
     })
   );
 

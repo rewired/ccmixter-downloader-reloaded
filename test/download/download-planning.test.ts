@@ -112,6 +112,27 @@ describe('download job planning', () => {
     expect(summary.blockedFiles).toBe(2);
     expect(summary.errors.map((error) => error.code)).toContain('DOWNLOAD_DUPLICATE_TARGET');
   });
+
+  it('keeps missing URLs skipped while unsafe URLs and targets remain blocking', () => {
+    const missingUrlJob = createDownloadJobFromReviewedPlan(createPlan({ includeMissingUrl: true }), { jobId: 'missing-url' });
+    const invalidProtocolJob = createDownloadJobFromReviewedPlan(planWithSourceUrl('ftp://ccmixter.org/content/WiseMan/BASS.flac'), {
+      jobId: 'invalid-protocol'
+    });
+    const invalidHostJob = createDownloadJobFromReviewedPlan(planWithSourceUrl('https://example.com/content/WiseMan/BASS.flac'), {
+      jobId: 'invalid-host'
+    });
+    const invalidPathJob = createDownloadJobFromReviewedPlan(planWithTargetPath('../escape.flac'), { jobId: 'invalid-path' });
+
+    expect(missingUrlJob.files.find((file) => file.originalFilename === 'missing.wav')?.status).toBe('skipped');
+    expect(summarizeDownloadJob(missingUrlJob).skippedFiles).toBe(1);
+    expect(summarizeDownloadJob(missingUrlJob).blockedFiles).toBe(0);
+    expect(invalidProtocolJob.files[0]?.status).toBe('blocked');
+    expect(invalidHostJob.files[0]?.status).toBe('blocked');
+    expect(invalidPathJob.files[0]?.status).toBe('blocked');
+    expect(summarizeDownloadJob(invalidProtocolJob).errors.map((error) => error.code)).toContain('DOWNLOAD_URL_PROTOCOL_BLOCKED');
+    expect(summarizeDownloadJob(invalidHostJob).errors.map((error) => error.code)).toContain('DOWNLOAD_URL_HOST_BLOCKED');
+    expect(summarizeDownloadJob(invalidPathJob).errors.map((error) => error.code)).toContain('DOWNLOAD_TARGET_TRAVERSAL');
+  });
 });
 
 function reviewedPlan(session: ReturnType<typeof createReviewSessionFromDryRunPlan>): DryRunPlan {
@@ -123,6 +144,18 @@ function planWithTargetPath(targetRelativePath: string): DryRunPlan {
   plan.plannedFiles[0] = {
     ...plan.plannedFiles[0]!,
     targetRelativePath
+  };
+  return plan;
+}
+
+function planWithSourceUrl(downloadUrl: string): DryRunPlan {
+  const plan = createPlan();
+  plan.plannedFiles[0] = {
+    ...plan.plannedFiles[0]!,
+    sourceFile: {
+      ...plan.plannedFiles[0]!.sourceFile,
+      downloadUrl
+    }
   };
   return plan;
 }

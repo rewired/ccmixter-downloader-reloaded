@@ -7,6 +7,7 @@ import type {
   StemLibraryRoot,
   TrackFile
 } from './models';
+import { withDownloadCandidateClassification } from './classification';
 
 export const ARTIST_SCAN_REALITY_CHECK_WARNING =
   'Artist scan may include previews, remixes, and non-stem uploads. Review carefully before downloading.';
@@ -174,7 +175,8 @@ export function createDryRunPlanFromGroups(
   }
 ): DryRunPlan {
   const input = options.input ?? parseCcmixterInput(rawInput);
-  const plannedFiles: PlannedFile[] = groups.flatMap((group) =>
+  const classifiedGroups = groups.map((group) => classifyGroupFiles(group));
+  const plannedFiles: PlannedFile[] = classifiedGroups.flatMap((group) =>
     group.files.map((sourceFile) => {
       const targetRelativePath = buildPlannedTargetPath(group, sourceFile);
 
@@ -192,13 +194,32 @@ export function createDryRunPlanFromGroups(
     input,
     stemLibraryRoot,
     targetDirectory: stemLibraryRoot.path,
-    groups,
+    groups: classifiedGroups,
     plannedFiles,
     warnings: options.warnings,
     createdAt: options.createdAt ?? new Date().toISOString(),
     placeholderData: options.placeholderData,
     resolverStatus: options.resolverStatus,
     metadataSource: options.metadataSource
+  };
+}
+
+function classifyGroupFiles(group: StemGroup): StemGroup {
+  const uploadTags = group.uploads.flatMap((upload) => upload.tags);
+  const uploadTitle = group.uploads.map((upload) => upload.title).join(' ');
+
+  return {
+    ...group,
+    files: group.files.map((file) =>
+      withDownloadCandidateClassification(file, {
+        uploadTags,
+        uploadTitle,
+        fileLabel: file.displayLabel,
+        qualityHint: file.qualityHint,
+        zipFileHints: file.zipFileHints,
+        metadataSource: file.metadataSource
+      })
+    )
   };
 }
 

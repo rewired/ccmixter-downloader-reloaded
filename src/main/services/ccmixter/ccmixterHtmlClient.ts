@@ -156,9 +156,12 @@ function parseFileCandidates(html: string, sourceUrl?: string): HtmlFileCandidat
     seen.add(key);
     candidates.push({
       label,
-      file: buildTrackFile(filename, resolvedUrl, 'html-enriched', [
-        'File candidate was extracted from upload-page HTML and has not been verified by the API.'
-      ])
+      file: {
+        ...buildTrackFile(filename, resolvedUrl, 'html-enriched', [
+          'File candidate was extracted from upload-page HTML and has not been verified by the API.'
+        ]),
+        displayLabel: label
+      }
     });
   }
 
@@ -178,9 +181,12 @@ function parseFileCandidates(html: string, sourceUrl?: string): HtmlFileCandidat
     seen.add(key);
     candidates.push({
       label: filename,
-      file: buildTrackFile(filename, resolvedUrl, 'html-enriched', [
-        'File candidate was extracted from upload-page script data and has not been verified by the API.'
-      ])
+      file: {
+        ...buildTrackFile(filename, resolvedUrl, 'html-enriched', [
+          'File candidate was extracted from upload-page script data and has not been verified by the API.'
+        ]),
+        displayLabel: filename
+      }
     });
   }
 

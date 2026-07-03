@@ -6,6 +6,7 @@ import {
   RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
   isArtistCatalogInput,
   parseCcmixterInput,
+  withDownloadCandidateClassification,
   type CcmixterInput,
   type DryRunPlan,
   type MetadataSourceType,
@@ -248,6 +249,7 @@ function mergeFiles(apiFiles: TrackFile[], enrichment: CcmixterHtmlEnrichment | 
         files.set(fileKey(existing), {
           ...existing,
           metadataSource: combineSource(existing.metadataSource, 'html-enriched'),
+          displayLabel: candidate.file.displayLabel ?? existing.displayLabel,
           zipFileHints,
           warnings: [...existing.warnings, 'Matching HTML file candidate was found for this API file.']
         });
@@ -377,7 +379,19 @@ function resolveFixtureMetadata(input: CcmixterInput, createdAt: string): Resolv
     return unresolvedMetadata(input, [`Unknown fixture ID: ${input.fixtureId ?? 'not specified'}.`], createdAt);
   }
 
-  const groups = HAZE_SMOKE_STEM_GROUPS;
+  const groups = HAZE_SMOKE_STEM_GROUPS.map((group) => ({
+    ...group,
+    files: group.files.map((file) =>
+      withDownloadCandidateClassification(file, {
+        uploadTags: group.uploads.flatMap((upload) => upload.tags),
+        uploadTitle: group.uploads.map((upload) => upload.title).join(' '),
+        fileLabel: file.displayLabel,
+        qualityHint: file.qualityHint,
+        zipFileHints: file.zipFileHints,
+        metadataSource: file.metadataSource
+      })
+    )
+  }));
   const uploads = groups.flatMap((group) => group.uploads);
   const files = groups.flatMap((group) => group.files);
   const warnings = [

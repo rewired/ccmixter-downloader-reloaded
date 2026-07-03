@@ -2,8 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   buildReviewedDryRunPlan,
+  clearIncludedDownloadCandidates,
   createDownloadJobFromReviewedPlan,
   createReviewSessionFromDryRunPlan,
+  excludeArchiveDownloadCandidates,
+  excludePreviewDownloadCandidates,
+  getDownloadCandidateClassification,
+  includeRecommendedDownloadCandidates,
   markGroupAccepted,
   markGroupNeedsReview,
   mergeGroups,
@@ -25,6 +30,7 @@ import {
   type DryRunPlan,
   type ResolvedCcmixterMetadata,
   type ReviewGroup,
+  type ReviewFile,
   type ReviewSession,
   type StemGroup,
   type StemLibraryRoot
@@ -644,6 +650,20 @@ function ReviewGroupList({
 
   return (
     <div className="group-list">
+      <div className="review-actions candidate-actions" aria-label="Review file selection actions">
+        <button type="button" className="secondary" onClick={() => onChange(includeRecommendedDownloadCandidates(reviewSession))}>
+          Include recommended source/stem/archive files
+        </button>
+        <button type="button" className="secondary" onClick={() => onChange(excludePreviewDownloadCandidates(reviewSession))}>
+          Exclude previews
+        </button>
+        <button type="button" className="secondary" onClick={() => onChange(excludeArchiveDownloadCandidates(reviewSession))}>
+          Exclude archives
+        </button>
+        <button type="button" className="secondary" onClick={() => onChange(clearIncludedDownloadCandidates(reviewSession))}>
+          Clear all included files
+        </button>
+      </div>
       {reviewSession.groups.map((group) => {
         const availableMergeTargets = reviewSession.groups.filter((candidate) => candidate.reviewGroupId !== group.reviewGroupId);
 
@@ -732,9 +752,7 @@ function ReviewGroupList({
                     />
                   </label>
                   {file.targetFilename !== file.originalFilename ? <small>Original: {file.originalFilename}</small> : null}
-                  <small>
-                    {file.originalFile.fileKind} / {file.originalFile.extension} / {file.originalFile.metadataSource}
-                  </small>
+                  <CandidateBadges file={file.originalFile} />
                   {group.files.length > 1 ? (
                     <button
                       type="button"
@@ -747,6 +765,13 @@ function ReviewGroupList({
                   {file.overrideWarnings.length > 0 ? (
                     <ul className="warning-list">
                       {file.overrideWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {file.warnings.length > 0 ? (
+                    <ul className="warning-list">
+                      {file.warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
                       ))}
                     </ul>
@@ -888,9 +913,7 @@ function GroupList({ groups }: { groups: StemGroup[] }): JSX.Element {
               {group.files.map((file) => (
                 <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`}>
                   <span>{file.originalFilename}</span>
-                  <small>
-                    {file.fileKind} / {file.extension} / {file.metadataSource}
-                  </small>
+                  <CandidateBadges file={file} />
                 </li>
               ))}
             </ul>
@@ -919,6 +942,20 @@ function GroupList({ groups }: { groups: StemGroup[] }): JSX.Element {
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function CandidateBadges({ file }: { file: ReviewFile['originalFile'] }): JSX.Element {
+  const classification = getDownloadCandidateClassification(file);
+  const label = `${classification.role} / ${classification.format} / ${classification.quality}`;
+  const title = classification.reasons.join(' ');
+
+  return (
+    <div className="candidate-badges" title={title}>
+      <span className="candidate-badge">{label}</span>
+      <span className="candidate-badge confidence-badge">{classification.confidence}</span>
+      <span className="candidate-badge source-badge">{file.metadataSource}</span>
     </div>
   );
 }

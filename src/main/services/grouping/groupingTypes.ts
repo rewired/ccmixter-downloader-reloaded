@@ -1,4 +1,4 @@
-import type { Confidence, StemGroup, TrackFile, TrackFileKind, TrackUpload } from '../../../shared/domain';
+import type { Confidence, DownloadCandidateClassification, StemGroup, TrackFile, TrackFileKind, TrackUpload } from '../../../shared/domain';
 
 export interface GroupingUploadCandidate {
   upload: TrackUpload;
@@ -16,11 +16,14 @@ export interface TitleRootNormalization {
 export interface FileClassificationContext {
   uploadTags: string[];
   uploadTitle?: string;
+  fileLabel?: string;
   qualityHint?: string;
+  zipFileHints?: string[];
 }
 
 export interface FileClassificationResult {
   fileKind: TrackFileKind;
+  classification: DownloadCandidateClassification;
   warnings: string[];
   reasons: string[];
 }

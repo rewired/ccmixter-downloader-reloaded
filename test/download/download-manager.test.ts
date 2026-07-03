@@ -1,10 +1,19 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createDryRunPlanFromGroups, type DryRunPlan, type StemGroup } from '../../src/shared/domain';
+import {
+  buildReviewedDryRunPlan,
+  createDryRunPlanFromGroups,
+  createReviewSessionFromDryRunPlan,
+  renameGroup,
+  toggleFileIncluded,
+  type DryRunPlan,
+  type StemGroup
+} from '../../src/shared/domain';
+import { CcmixterResolver } from '../../src/main/services/ccmixter/ccmixterResolver';
 import { DownloadManager } from '../../src/main/services/download/downloadManager';
 import type { DownloadFetcher, DownloadFetcherResponse } from '../../src/main/services/download/downloadTypes';
 
@@ -187,6 +196,54 @@ describe('DownloadManager', () => {
     expect(state.files[1]?.status).toBe('cancelled');
     expect(await findTempFiles(root)).toEqual([]);
   });
+
+  it('runs fixture smoke downloads through review state and the real download manager', async () => {
+    const root = await smokeRoot();
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async () => [],
+        resolveByUploadId: async () => []
+      }
+    });
+    const dryRun = await resolver.createDryRunPlan('fixture:haze-smoke', {
+      path: root,
+      selectedAt: '2026-07-03T00:00:00.000Z'
+    });
+    let review = createReviewSessionFromDryRunPlan(dryRun);
+    review = renameGroup(review, review.groups[0]!.reviewGroupId, 'Haze smoke review');
+
+    const archiveFile = review.groups[0]!.files.find((file) => file.originalFile.fileKind === 'archive')!;
+    review = toggleFileIncluded(review, archiveFile.fileId);
+    const reviewedPlan = buildReviewedDryRunPlan(review, dryRun.stemLibraryRoot);
+    const manager = new DownloadManager({
+      fetcher: fakeFetcher({
+        'https://ccmixter.org/content/Zutsuri/Zutsuri_-_Haze_1.mp3': responseFrom(['fixture-smoke-data'])
+      })
+    });
+    const job = await manager.createJobFromReviewedPlan(reviewedPlan);
+    const target = path.join(root, 'Zutsuri', 'Haze smoke review', 'Zutsuri_-_Haze_1.mp3');
+
+    expect(dryRun.placeholderData).toBe(true);
+    expect(dryRun.input.kind).toBe('fixture');
+    expect(review.groups[0]?.files.some((file) => file.originalFile.fileKind === 'archive' && !file.included)).toBe(true);
+    expect(reviewedPlan.plannedFiles.map((file) => file.sourceFile.originalFilename)).toEqual([
+      'Zutsuri_-_Haze_1.mp3',
+      'fixture-missing-url.wav'
+    ]);
+    expect(await collectFiles(root)).toEqual([]);
+    expect(job.files.find((file) => file.originalFilename === 'fixture-missing-url.wav')?.status).toBe('skipped');
+
+    const state = await manager.startDownloadJob(job.jobId);
+
+    expect(state.status).toBe('completed');
+    expect(state.progress.completedFiles).toBe(1);
+    expect(state.progress.skippedFiles).toBe(1);
+    expect(await readFile(target, 'utf8')).toBe('fixture-smoke-data');
+    expect((await collectFiles(root)).map((file) => path.relative(root, file))).toEqual([
+      path.join('Zutsuri', 'Haze smoke review', 'Zutsuri_-_Haze_1.mp3')
+    ]);
+    expect(await findTempFiles(root)).toEqual([]);
+  });
 });
 
 function createPlan(rootPath: string, options: { missingUrl?: boolean; secondFile?: boolean } = {}): DryRunPlan {
@@ -239,6 +296,14 @@ function group(options: { missingUrl?: boolean; secondFile?: boolean }): StemGro
 
 async function tempRoot(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'ccmixter-download-'));
+  tempRoots.push(dir);
+  return dir;
+}
+
+async function smokeRoot(): Promise<string> {
+  const dir = path.join(tmpdir(), 'ccmixter-slice-5-5-smoke');
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
   tempRoots.push(dir);
   return dir;
 }

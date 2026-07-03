@@ -41,6 +41,10 @@ describe('renderer safety', () => {
     expect(source).toContain('Included files');
     expect(source).toContain('resolveArtistCatalogCounts');
     expect(source).toContain('isArtistCatalogInput');
+    expect(source).toContain('Include recommended source/stem/archive files');
+    expect(source).toContain('Exclude previews');
+    expect(source).toContain('Exclude archives');
+    expect(source).toContain('Clear all included files');
   });
 });
 

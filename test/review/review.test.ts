@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildReviewedDryRunPlan,
+  clearIncludedDownloadCandidates,
   createDryRunPlanFromGroups,
   createReviewSessionFromDryRunPlan,
+  excludeArchiveDownloadCandidates,
+  excludePreviewDownloadCandidates,
+  includeRecommendedDownloadCandidates,
   markGroupAccepted,
   markGroupNeedsReview,
   mergeGroups,
@@ -71,14 +75,17 @@ describe('review session overrides', () => {
     expect(session.groups[1]?.files.map((file) => file.included)).toEqual([false]);
   });
 
-  it('keeps upload-link and upload-id review files included by default', () => {
+  it('keeps upload-link, upload-id, and fixture review files included by default', () => {
     const uploadLinkSession = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/files/WiseMan/64501'));
     const uploadIdSession = createReviewSessionFromDryRunPlan(createPlan('64501'));
+    const fixtureSession = createReviewSessionFromDryRunPlan(createPlan('fixture:haze-smoke'));
 
     expect(uploadLinkSession.sourcePlan.input.kind).toBe('upload-link');
     expect(uploadLinkSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
     expect(uploadIdSession.sourcePlan.input.kind).toBe('upload-id');
     expect(uploadIdSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+    expect(fixtureSession.sourcePlan.input.kind).toBe('fixture');
+    expect(fixtureSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
   });
 
   it('creates zero planned files from an untouched artist catalog review', () => {
@@ -88,6 +95,18 @@ describe('review session overrides', () => {
     expect(session.sourcePlan.input.kind).toBe('artist-link');
     expect(plan.plannedFiles).toEqual([]);
     expect(plan.warnings).toContain('No files are included in the reviewed dry-run plan.');
+  });
+
+  it('applies candidate review actions explicitly', () => {
+    const session = clearIncludedDownloadCandidates(createReviewSessionFromDryRunPlan(createPlan()));
+    const recommended = includeRecommendedDownloadCandidates(session);
+    const withoutPreviews = excludePreviewDownloadCandidates(createReviewSessionFromDryRunPlan(createPlan()));
+    const withoutArchives = excludeArchiveDownloadCandidates(createReviewSessionFromDryRunPlan(createPlanWithArchive()));
+
+    expect(recommended.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
+    expect(recommended.groups[1]?.files.map((file) => file.included)).toEqual([true]);
+    expect(withoutPreviews.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
+    expect(withoutArchives.groups[0]?.files.map((file) => file.included)).toEqual([true, true, false]);
   });
 
   it('marks groups accepted and needs review without removing low-confidence warnings', () => {
@@ -157,6 +176,37 @@ function createPlan(rawInput = 'https://ccmixter.org/files/WiseMan/64501'): DryR
   );
 }
 
+function createPlanWithArchive(): DryRunPlan {
+  return createDryRunPlanFromGroups(
+    'https://ccmixter.org/files/WiseMan/64501',
+    root(),
+    [
+      {
+        ...groupA(),
+        files: [
+          ...groupA().files,
+          {
+            originalFilename: 'Boxcar-stems.zip',
+            fileKind: 'archive',
+            extension: 'zip',
+            downloadUrl: 'https://ccmixter.org/content/WiseMan/Boxcar-stems.zip',
+            metadataSource: 'api',
+            zipFileHints: ['BASS.flac'],
+            warnings: []
+          }
+        ]
+      }
+    ],
+    {
+      createdAt: '2026-07-03T00:00:00.000Z',
+      metadataSource: 'api',
+      placeholderData: false,
+      resolverStatus: 'resolved',
+      warnings: ['No files will be downloaded.']
+    }
+  );
+}
+
 function root() {
   return {
     path: 'D:/Stem Library',
@@ -176,6 +226,7 @@ function groupA(): StemGroup {
         originalFilename: 'BASS.flac',
         fileKind: 'stem',
         extension: 'flac',
+        downloadUrl: 'https://ccmixter.org/content/WiseMan/BASS.flac',
         metadataSource: 'api',
         warnings: []
       },
@@ -183,6 +234,7 @@ function groupA(): StemGroup {
         originalFilename: 'preview.mp3',
         fileKind: 'preview',
         extension: 'mp3',
+        downloadUrl: 'https://ccmixter.org/content/WiseMan/preview.mp3',
         metadataSource: 'api',
         warnings: ['Preview file classification warning.']
       }
@@ -208,6 +260,7 @@ function groupB(): StemGroup {
         originalFilename: 'VOCALS.flac',
         fileKind: 'stem',
         extension: 'flac',
+        downloadUrl: 'https://ccmixter.org/content/WiseMan/VOCALS.flac',
         metadataSource: 'api',
         warnings: []
       }

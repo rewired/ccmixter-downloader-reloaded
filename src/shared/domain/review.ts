@@ -10,6 +10,7 @@ import type {
   StemLibraryRoot,
   TrackFile
 } from './models';
+import { getDownloadCandidateClassification, isRecommendedDownloadCandidate } from './classification';
 import { buildSongFolderName, isArtistCatalogInput, sanitizePathSegment } from './planning';
 
 export function createReviewSessionFromDryRunPlan(plan: DryRunPlan): ReviewSession {
@@ -87,6 +88,26 @@ export function toggleFileIncluded(session: ReviewSession, fileId: string): Revi
   });
 
   return override ? addSessionOverride(nextSession, override) : nextSession;
+}
+
+export function includeRecommendedDownloadCandidates(session: ReviewSession): ReviewSession {
+  return setFileInclusion(session, (file) => isRecommendedDownloadCandidate(file.originalFile));
+}
+
+export function excludePreviewDownloadCandidates(session: ReviewSession): ReviewSession {
+  return setFileInclusion(session, (file) =>
+    getDownloadCandidateClassification(file.originalFile).role === 'preview' ? false : file.included
+  );
+}
+
+export function excludeArchiveDownloadCandidates(session: ReviewSession): ReviewSession {
+  return setFileInclusion(session, (file) =>
+    getDownloadCandidateClassification(file.originalFile).role === 'archive' ? false : file.included
+  );
+}
+
+export function clearIncludedDownloadCandidates(session: ReviewSession): ReviewSession {
+  return setFileInclusion(session, () => false);
 }
 
 export function markGroupAccepted(session: ReviewSession, groupId: string): ReviewSession {
@@ -370,6 +391,36 @@ function updateFile(
 
   const nextSession = found ? { ...session, groups } : addSessionWarning(session, `Review file ${fileId} was not found.`);
   return found && sessionOverride ? addSessionOverride(nextSession, sessionOverride) : nextSession;
+}
+
+function setFileInclusion(session: ReviewSession, resolver: (file: ReviewFile) => boolean): ReviewSession {
+  const overrides: ReviewOverride[] = [];
+  const groups = session.groups.map((group) => ({
+    ...group,
+    files: group.files.map((file) => {
+      const included = resolver(file);
+
+      if (included !== file.included) {
+        overrides.push({
+          kind: 'file-selection',
+          fileId: file.fileId,
+          included,
+          warnings: []
+        });
+      }
+
+      return {
+        ...file,
+        included
+      };
+    })
+  }));
+
+  return {
+    ...session,
+    groups,
+    overrides: [...session.overrides, ...overrides]
+  };
 }
 
 function createRenameOverride(target: 'artist' | 'song' | 'file', targetId: string, originalValue: string, nextValue: string): ReviewOverride {
