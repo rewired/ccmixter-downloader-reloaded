@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING } from '../../src/shared/domain';
 import {
   buildCcmixterQueryUrl,
   CcmixterApiClient,
@@ -89,7 +90,7 @@ describe('CcmixterApiClient mapping', () => {
 
     expect(hazeResult.upload.relatedUploadUrls).toContain('https://ccmixter.org/files/Reiswerk/56402');
     expect(soundbitchResult.upload.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/2440');
-    expect(hazeResult.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
-    expect(soundbitchResult.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
+    expect(hazeResult.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
+    expect(soundbitchResult.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   });
 });

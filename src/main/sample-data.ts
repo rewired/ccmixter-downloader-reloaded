@@ -1,4 +1,4 @@
-import type { StemGroup } from '../shared/domain';
+import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING, type StemGroup } from '../shared/domain';
 
 export const HAZE_SMOKE_FIXTURE_ID = 'haze-smoke';
 
@@ -17,7 +17,7 @@ export const HAZE_SMOKE_STEM_GROUPS: StemGroup[] = [
     unverifiedFields: [],
     warnings: [
       'Fixture/sample data: this smoke fixture is recorded data, not live recursive ccMixter resolution.',
-      'Related upload links may be detected but are not recursively resolved in this slice.'
+      RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING
     ],
     uploads: [
       {

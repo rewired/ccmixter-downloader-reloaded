@@ -1,4 +1,4 @@
-import type { MetadataSourceType, TrackFile, TrackFileKind } from '../../../shared/domain';
+import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING, type MetadataSourceType, type TrackFile, type TrackFileKind } from '../../../shared/domain';
 import type {
   CcmixterApiClientOptions,
   CcmixterApiQuery,
@@ -8,6 +8,7 @@ import type {
 
 const DEFAULT_QUERY_API_URL = 'https://ccmixter.org/api/query';
 const DEFAULT_TIMEOUT_MS = 10_000;
+export const ARTIST_CATALOG_QUERY_LIMIT = 100;
 const AUDIO_OR_ARCHIVE_EXTENSIONS = new Set(['mp3', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'm4a', 'zip']);
 
 export class CcmixterApiClient {
@@ -22,7 +23,7 @@ export class CcmixterApiClient {
   }
 
   async resolveByArtistLogin(artistLogin: string): Promise<CcmixterApiUploadMapping[]> {
-    const url = buildCcmixterQueryUrl({ artistLogin, dataview: 'info', limit: 100 }, this.baseUrl);
+    const url = buildCcmixterQueryUrl({ artistLogin, dataview: 'info', limit: ARTIST_CATALOG_QUERY_LIMIT }, this.baseUrl);
     const response = await this.fetchJson(url);
     return parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
   }
@@ -160,7 +161,7 @@ export function mapRawApiUpload(raw: RawCcmixterApiUpload): CcmixterApiUploadMap
   }
 
   if (relatedUploadUrls.length > 0) {
-    warnings.push('Related upload links were found in API data but are not recursively resolved in this slice.');
+    warnings.push(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   }
 
   const files = mapRawFiles(raw, warnings);

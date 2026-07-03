@@ -12,6 +12,8 @@ import {
   renameGroup,
   resetGroupOverrides,
   splitGroup,
+  ARTIST_SCAN_REALITY_CHECK_WARNING,
+  isArtistCatalogInput,
   summarizeDownloadJob,
   toggleFileIncluded,
   validateDownloadJob,
@@ -281,6 +283,9 @@ export function App(): JSX.Element {
   );
   const advisoryDownloadValidation = advisoryDownloadJob ? validateDownloadJob(advisoryDownloadJob) : null;
   const advisoryDownloadSummary = advisoryDownloadJob ? summarizeDownloadJob(advisoryDownloadJob) : null;
+  const activeInput = dryRunPlan?.input ?? resolvedMetadata?.input ?? parsedInput;
+  const isArtistCatalog = activeInput ? isArtistCatalogInput(activeInput) : false;
+  const catalogCounts = isArtistCatalog ? resolveArtistCatalogCounts(resolvedMetadata, dryRunPlan, reviewedDryRunPlan) : null;
   const canPrepareDownload =
     Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
     status !== 'loading';
@@ -300,6 +305,14 @@ export function App(): JSX.Element {
           <strong>{DOWNLOAD_WARNING}</strong>
           <span>No ZIP extraction or attribution writing happens in this slice.</span>
         </section>
+
+        {isArtistCatalog ? (
+          <section className="banner artist-scan-banner" role="status">
+            <strong>Review artist uploads</strong>
+            <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
+            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
+          </section>
+        ) : null}
 
         <section className="controls" aria-label="Dry run controls">
           <label className="field">
@@ -329,7 +342,7 @@ export function App(): JSX.Element {
               Resolve metadata
             </button>
             <button type="button" onClick={() => void createDryRunPlan()} disabled={!canCreateDryRun}>
-              Create dry run
+              {isArtistCatalog ? 'Review artist uploads' : 'Create dry run'}
             </button>
           </div>
         </section>
@@ -374,10 +387,11 @@ export function App(): JSX.Element {
           </article>
 
           <article className="panel preview-panel">
-            <h2>Planned paths below root folder</h2>
+            <h2>{isArtistCatalog ? 'Review artist uploads' : 'Planned paths below root folder'}</h2>
             {dryRunPlan ? (
               <>
                 <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
                 {reviewSession ? (
                   <ReviewGroupList reviewSession={reviewSession} onChange={setReviewSession} />
                 ) : (
@@ -404,6 +418,7 @@ export function App(): JSX.Element {
                     downloadJob={downloadJob}
                     downloadQueueState={downloadQueueState}
                     downloadResult={downloadResult}
+                    isArtistCatalog={isArtistCatalog}
                     onCancel={(jobId) => void cancelDownloadJob(jobId)}
                     onConfirm={(jobId) => void confirmDownloadJob(jobId)}
                     onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
@@ -414,6 +429,7 @@ export function App(): JSX.Element {
             ) : resolvedMetadata ? (
               <>
                 <GroupList groups={resolvedMetadata.groups} />
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
                 {resolvedMetadata.warnings.length > 0 ? (
                   <ul className="warning-list">
                     {resolvedMetadata.warnings.map((warning) => (
@@ -434,6 +450,47 @@ export function App(): JSX.Element {
   );
 }
 
+interface ArtistCatalogCounts {
+  uploadCount: number;
+  plannedFileCount: number;
+  includedFileCount: number;
+}
+
+function resolveArtistCatalogCounts(
+  resolvedMetadata: ResolvedCcmixterMetadata | null,
+  dryRunPlan: DryRunPlan | null,
+  reviewedDryRunPlan: DryRunPlan | null
+): ArtistCatalogCounts {
+  const uploadIds = new Set(
+    (dryRunPlan?.groups.flatMap((group) => group.uploads) ?? resolvedMetadata?.uploads ?? []).map((upload) => upload.uploadId)
+  );
+
+  return {
+    uploadCount: uploadIds.size,
+    plannedFileCount: dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
+    includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
+  };
+}
+
+function ArtistCatalogCounts({ counts }: { counts: ArtistCatalogCounts }): JSX.Element {
+  return (
+    <dl className="details compact artist-catalog-counts" aria-label="Artist catalog scan counts">
+      <div>
+        <dt>Uploads</dt>
+        <dd>{counts.uploadCount}</dd>
+      </div>
+      <div>
+        <dt>Planned files</dt>
+        <dd>{counts.plannedFileCount}</dd>
+      </div>
+      <div>
+        <dt>Included files</dt>
+        <dd>{counts.includedFileCount}</dd>
+      </div>
+    </dl>
+  );
+}
+
 function DownloadPanel({
   advisoryJob,
   advisorySummary,
@@ -442,6 +499,7 @@ function DownloadPanel({
   downloadJob,
   downloadQueueState,
   downloadResult,
+  isArtistCatalog,
   onCancel,
   onConfirm,
   onPrepare,
@@ -454,6 +512,7 @@ function DownloadPanel({
   downloadJob: DownloadJob | null;
   downloadQueueState: DownloadQueueState | null;
   downloadResult: DownloadResult | null;
+  isArtistCatalog: boolean;
   onCancel: (jobId: string) => void;
   onConfirm: (jobId: string) => void;
   onPrepare: () => void;
@@ -474,7 +533,7 @@ function DownloadPanel({
       <div className="download-heading">
         <div>
           <h3>Download</h3>
-          <span>{summary.writableFiles} file(s) ready to write</span>
+          <span>{summary.writableFiles} writable file(s)</span>
         </div>
         <span className={`source-badge status-${downloadQueueState?.status ?? downloadJob?.status ?? 'queued'}`}>
           {downloadQueueState?.status ?? downloadJob?.status ?? 'not prepared'}
@@ -506,7 +565,7 @@ function DownloadPanel({
 
       <div className="download-actions">
         <button type="button" onClick={onPrepare} disabled={!canPrepareDownload}>
-          Start Download
+          {isArtistCatalog ? 'Prepare selected uploads' : 'Start Download'}
         </button>
         <button type="button" className="secondary" onClick={() => onConfirm(downloadJob!.jobId)} disabled={!canConfirm}>
           Confirm Download

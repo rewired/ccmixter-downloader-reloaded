@@ -8,6 +8,13 @@ import type {
   TrackFile
 } from './models';
 
+export const ARTIST_SCAN_REALITY_CHECK_WARNING =
+  'Artist scan may include previews, remixes, and non-stem uploads. Review carefully before downloading.';
+export const ARTIST_SCAN_PAGINATION_WARNING = 'Artist pagination is not implemented in this slice. Results may be incomplete.';
+export const RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING = 'Related uploads are detected but not recursively resolved.';
+export const ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING =
+  'Artist catalog group has no explicit source, stem, or archive evidence.';
+
 const SOURCE_SUFFIX_PATTERN =
   /\s*(?:\((?:source|sources|stems?|instrumental stems?|pells|acapella|a cappella|vocals|instrumental)\)|\[(?:source|sources|stems?|instrumental stems?|pells|acapella|a cappella|vocals|instrumental)\]|-\s*(?:source|sources|stems?))\s*$/i;
 
@@ -85,6 +92,10 @@ export function parseCcmixterInput(raw: string): CcmixterInput {
     kind: 'unknown',
     warnings: ['Input is ambiguous and was not recognized as a ccMixter artist, upload link, or upload ID.']
   };
+}
+
+export function isArtistCatalogInput(input: CcmixterInput): boolean {
+  return input.kind === 'artist-link' || input.kind === 'artist-name';
 }
 
 export function normalizeSongTitle(title: string): string {

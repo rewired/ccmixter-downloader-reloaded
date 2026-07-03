@@ -7,6 +7,12 @@ import { mapRawApiUpload, parseCcmixterApiResponse } from '../../src/main/servic
 import { parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
 import { buildGroupingCandidates, CcmixterResolver } from '../../src/main/services/ccmixter/ccmixterResolver';
 import { groupStemUploads } from '../../src/main/services/grouping/stemGrouper';
+import {
+  ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING,
+  ARTIST_SCAN_PAGINATION_WARNING,
+  ARTIST_SCAN_REALITY_CHECK_WARNING,
+  RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING
+} from '../../src/shared/domain';
 import artistFixture from '../fixtures/ccmixter/artist-info.json';
 import hazeFixture from '../fixtures/ccmixter/haze-56384-info.json';
 import missingFieldsFixture from '../fixtures/ccmixter/missing-fields.json';
@@ -72,10 +78,40 @@ describe('CcmixterResolver', () => {
     expect(groups[0]?.groupingReasons).toContain('Same artist and normalized song title root.');
   });
 
-  it('creates dry-run path planning from resolved metadata', async () => {
+  it('treats artist links as catalog scans with independent low-confidence groups when evidence is missing', async () => {
+    const artistCalls: string[] = [];
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => parseCcmixterApiResponse(artistFixture).map((upload) => mapRawApiUpload(upload)),
+        resolveByArtistLogin: async (artistLogin) => {
+          artistCalls.push(artistLogin);
+          return unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload));
+        },
+        resolveByUploadId: async () => []
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('https://ccmixter.org/people/WiseMan', { enrichHtml: false });
+
+    expect(artistCalls).toEqual(['wiseman']);
+    expect(metadata.input.kind).toBe('artist-link');
+    expect(metadata.warnings).toContain(ARTIST_SCAN_REALITY_CHECK_WARNING);
+    expect(metadata.warnings).not.toContain(ARTIST_SCAN_PAGINATION_WARNING);
+    expect(metadata.warnings).not.toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
+    expect(metadata.groups).toHaveLength(2);
+    expect(metadata.groups.map((group) => group.confidence)).toEqual(['low', 'low']);
+    expect(metadata.groups.every((group) => group.warnings.includes(ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING))).toBe(true);
+    expect(metadata.uploads).toHaveLength(2);
+    expect(metadata.files).toHaveLength(2);
+  });
+
+  it('treats plain artist-name inputs as artist catalog scans', async () => {
+    const artistCalls: string[] = [];
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async (artistLogin) => {
+          artistCalls.push(artistLogin);
+          return unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload));
+        },
         resolveByUploadId: async () => []
       },
       htmlClient: {
@@ -91,6 +127,69 @@ describe('CcmixterResolver', () => {
     });
 
     const plan = await resolver.createDryRunPlan('WiseMan', {
+      path: 'D:/Stem Library',
+      selectedAt: '2026-07-03T00:00:00.000Z'
+    });
+
+    expect(artistCalls).toEqual(['wiseman']);
+    expect(plan.input.kind).toBe('artist-name');
+    expect(plan.warnings).toContain(ARTIST_SCAN_REALITY_CHECK_WARNING);
+    expect(plan.warnings).not.toContain(ARTIST_SCAN_PAGINATION_WARNING);
+    expect(plan.groups).toHaveLength(2);
+    expect(plan.groups.map((group) => group.confidence)).toEqual(['low', 'low']);
+    expect(plan.plannedFiles).toHaveLength(2);
+  });
+
+  it('warns about artist pagination only when the artist API result reaches the current slice limit', async () => {
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async () =>
+          Array.from({ length: 100 }, (_value, index) =>
+            mapRawApiUpload({
+              upload_id: `page-${index}`,
+              upload_name: `Catalog Upload ${index}`,
+              user_name: 'WiseMan',
+              user_real_name: 'Wiseman',
+              upload_bpm: 100 + index,
+              upload_tags: 'audio mp3',
+              license_name: 'Creative Commons Attribution',
+              file_page_url: `https://ccmixter.org/files/WiseMan/page-${index}`,
+              files: [
+                {
+                  file_name: `catalog-${index}.mp3`,
+                  download_url: `https://ccmixter.org/content/WiseMan/catalog-${index}.mp3`
+                }
+              ]
+            })
+          ),
+        resolveByUploadId: async () => []
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('WiseMan', { enrichHtml: false });
+
+    expect(metadata.warnings).toContain(ARTIST_SCAN_PAGINATION_WARNING);
+  });
+
+  it('creates dry-run path planning from resolved metadata', async () => {
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async () => [],
+        resolveByUploadId: async () => parseCcmixterApiResponse(uploadFixture).map((upload) => mapRawApiUpload(upload))
+      },
+      htmlClient: {
+        enrichUploadPage: async (sourceUrl) => ({
+          sourceUrl,
+          tags: [],
+          fileCandidates: [],
+          zipFileHints: [],
+          relatedUploadUrls: [],
+          warnings: []
+        })
+      }
+    });
+
+    const plan = await resolver.createDryRunPlan('https://ccmixter.org/files/WiseMan/64501', {
       path: 'D:/Stem Library',
       selectedAt: '2026-07-03T00:00:00.000Z'
     });
@@ -164,8 +263,7 @@ describe('CcmixterResolver', () => {
     ]);
     expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze_1.mp3');
     expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze.zip');
-    expect(metadata.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
-    expect(metadata.warnings).toContain('Related upload links were found in HTML but are not recursively resolved in this slice.');
+    expect(metadata.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   });
 
   it('detects recorded remix-child links without recursively resolving sibling pages', async () => {
@@ -192,9 +290,46 @@ describe('CcmixterResolver', () => {
 
     expect(htmlFetchCount).toBe(2);
     expect(metadata.uploads[0]?.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/2440');
-    expect(metadata.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
+    expect(metadata.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
     expect(plan.plannedFiles[0]?.targetRelativePath).toBe(
       'Chillheimer&Soundbitch/pls-crepman-grunge-90bpm (90 bpm)/soundbitch_-_pls-crepman-grunge-90bpm.mp3'
     );
   });
 });
+
+function unrelatedCatalogUploads(): Record<string, unknown>[] {
+  return [
+    {
+      upload_id: '80001',
+      upload_name: 'Morning Sketch',
+      user_name: 'WiseMan',
+      user_real_name: 'Wiseman',
+      upload_bpm: 92,
+      upload_tags: 'audio mp3',
+      license_name: 'Creative Commons Attribution',
+      file_page_url: 'https://ccmixter.org/files/WiseMan/80001',
+      files: [
+        {
+          file_name: 'morning-sketch.mp3',
+          download_url: 'https://ccmixter.org/content/WiseMan/morning-sketch.mp3'
+        }
+      ]
+    },
+    {
+      upload_id: '80002',
+      upload_name: 'Night Roads',
+      user_name: 'WiseMan',
+      user_real_name: 'Wiseman',
+      upload_bpm: 118,
+      upload_tags: 'audio mp3',
+      license_name: 'Creative Commons Attribution',
+      file_page_url: 'https://ccmixter.org/files/WiseMan/80002',
+      files: [
+        {
+          file_name: 'night-roads.mp3',
+          download_url: 'https://ccmixter.org/content/WiseMan/night-roads.mp3'
+        }
+      ]
+    }
+  ];
+}

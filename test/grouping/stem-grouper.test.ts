@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDryRunPlanFromGroups, type TrackFile, type TrackUpload } from '../../src/shared/domain';
+import {
+  RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
+  createDryRunPlanFromGroups,
+  type TrackFile,
+  type TrackUpload
+} from '../../src/shared/domain';
 import { classifyTrackFileCandidate, groupStemUploads, normalizeTitleRoot } from '../../src/main/services/grouping/stemGrouper';
 
 describe('normalizeTitleRoot', () => {
@@ -116,7 +121,7 @@ describe('groupStemUploads', () => {
 
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]?.confidence).toBe('low');
-    expect(result.groups[0]?.warnings).toContain('Related upload link detected but not recursively resolved.');
+    expect(result.groups[0]?.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
     expect(result.groups[0]?.warnings).toContain('Multiple possible song roots are present in this group.');
     expect(result.groups[0]?.ambiguousUploads.map((item) => item.uploadId)).toEqual(['1', '2']);
   });

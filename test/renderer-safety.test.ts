@@ -30,6 +30,18 @@ describe('renderer safety', () => {
 
     expect(violations).toEqual([]);
   });
+
+  it('renders artist catalog reality-check copy and scan counts from shared renderer state', async () => {
+    const source = await readFile(path.resolve('src/renderer/ui/App.tsx'), 'utf8');
+
+    expect(source).toContain('ARTIST_SCAN_REALITY_CHECK_WARNING');
+    expect(source).toContain('Review artist uploads');
+    expect(source).toContain('Uploads');
+    expect(source).toContain('Planned files');
+    expect(source).toContain('Included files');
+    expect(source).toContain('resolveArtistCatalogCounts');
+    expect(source).toContain('isArtistCatalogInput');
+  });
 });
 
 async function collectRendererSourceFiles(root: string): Promise<string[]> {

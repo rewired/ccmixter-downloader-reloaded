@@ -1,5 +1,10 @@
 import {
   createDryRunPlanFromGroups,
+  ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING,
+  ARTIST_SCAN_PAGINATION_WARNING,
+  ARTIST_SCAN_REALITY_CHECK_WARNING,
+  RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
+  isArtistCatalogInput,
   parseCcmixterInput,
   type CcmixterInput,
   type DryRunPlan,
@@ -13,7 +18,7 @@ import {
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
 import { HAZE_SMOKE_FIXTURE_ID, HAZE_SMOKE_STEM_GROUPS } from '../../sample-data';
-import { CcmixterApiClient } from './ccmixterApiClient';
+import { ARTIST_CATALOG_QUERY_LIMIT, CcmixterApiClient } from './ccmixterApiClient';
 import { CcmixterHtmlClient } from './ccmixterHtmlClient';
 import type {
   CcmixterApiUploadMapping,
@@ -28,6 +33,24 @@ const DRY_RUN_ONLY_WARNINGS = [
   'No ZIP extraction happened.',
   'No attribution files were written.'
 ];
+const EVIDENCE_TAG_HINTS = new Set([
+  'stem',
+  'stems',
+  'source',
+  'sources',
+  'pells',
+  'acapella',
+  'a_cappella',
+  'instrumental',
+  'flac',
+  'wav',
+  'aif',
+  'aiff',
+  'zip',
+  'archive',
+  'multiple_formats'
+]);
+const EVIDENCE_FILENAME_PATTERN = /\b(stems?|sources?|pells?|acapp?ella|instrumental stems?|zip)\b/i;
 
 export class CcmixterResolver {
   private readonly apiClient: CcmixterResolverDependencies['apiClient'];
@@ -62,11 +85,12 @@ export class CcmixterResolver {
     const enrichments = options.enrichHtml === false ? [] : await this.enrichUploads(mappingsResult.mappings);
     const groupingCandidates = buildGroupingCandidates(mappingsResult.mappings, enrichments);
     const groupingResult = groupStemUploads(groupingCandidates);
-    const groups = groupingResult.groups;
+    const groups = isArtistCatalogInput(input) ? applyArtistCatalogGroupRules(groupingResult.groups) : groupingResult.groups;
     const uploads = groups.flatMap((group) => group.uploads);
     const files = groups.flatMap((group) => group.files);
     const warnings = [
       ...input.warnings.filter((warning) => !warning.includes('has not been verified')),
+      ...artistCatalogWarnings(input, mappingsResult.mappings),
       ...mappingsResult.mappings.flatMap((mapping) => mapping.warnings),
       ...enrichments.flatMap((enrichment) => enrichment.warnings),
       ...groups.flatMap((group) => group.warnings),
@@ -194,7 +218,7 @@ function applyHtmlEnrichment(upload: TrackUpload, enrichment: CcmixterHtmlEnrich
   const warnings = [...upload.warnings, ...enrichment.warnings];
 
   if (enrichment.relatedUploadUrls.length > 0) {
-    warnings.push('Related upload links were found in HTML but are not recursively resolved in this slice.');
+    warnings.push(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   }
 
   return {
@@ -280,6 +304,54 @@ function hasContributedHtmlData(enrichment: CcmixterHtmlEnrichment): boolean {
     enrichment.zipFileHints.length > 0 ||
     enrichment.relatedUploadUrls.length > 0
   );
+}
+
+function artistCatalogWarnings(input: CcmixterInput, mappings: CcmixterApiUploadMapping[]): string[] {
+  if (!isArtistCatalogInput(input)) {
+    return [];
+  }
+
+  return [
+    ARTIST_SCAN_REALITY_CHECK_WARNING,
+    mappings.length >= ARTIST_CATALOG_QUERY_LIMIT ? ARTIST_SCAN_PAGINATION_WARNING : undefined,
+    mappings.some(mappingHasRelatedUploads) ? RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING : undefined
+  ].filter((warning): warning is string => typeof warning === 'string');
+}
+
+function mappingHasRelatedUploads(mapping: CcmixterApiUploadMapping): boolean {
+  return (
+    (mapping.upload.relatedUploadUrls?.length ?? 0) > 0 ||
+    (mapping.upload.sourceUploadIds?.length ?? 0) > 0 ||
+    (mapping.upload.remixOfUploadIds?.length ?? 0) > 0
+  );
+}
+
+function applyArtistCatalogGroupRules(groups: StemGroup[]): StemGroup[] {
+  return groups.map((group) => {
+    if (hasExplicitSourceStemArchiveEvidence(group)) {
+      return group;
+    }
+
+    return {
+      ...group,
+      confidence: 'low',
+      warnings: [...group.warnings, ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING].filter((warning, index, all) => all.indexOf(warning) === index)
+    };
+  });
+}
+
+function hasExplicitSourceStemArchiveEvidence(group: StemGroup): boolean {
+  return (
+    group.uploads.some((upload) => upload.tags.map(normalizeEvidenceHint).some((tag) => EVIDENCE_TAG_HINTS.has(tag))) ||
+    group.uploads.some((upload) => EVIDENCE_FILENAME_PATTERN.test(upload.title)) ||
+    group.files.some((file) => file.fileKind === 'stem' || file.fileKind === 'archive') ||
+    group.files.some((file) => ['flac', 'wav', 'aif', 'aiff', 'zip'].includes(file.extension.toLowerCase())) ||
+    group.files.some((file) => EVIDENCE_FILENAME_PATTERN.test(file.originalFilename))
+  );
+}
+
+function normalizeEvidenceHint(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
 function unresolvedMetadata(input: CcmixterInput, warnings: string[], createdAt: string): ResolvedCcmixterMetadata {

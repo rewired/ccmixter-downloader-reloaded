@@ -63,6 +63,33 @@ describe('review session overrides', () => {
     expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).not.toContain('preview.mp3');
   });
 
+  it('defaults artist catalog review files to excluded while keeping them visible', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan('WiseMan'));
+
+    expect(session.sourcePlan.input.kind).toBe('artist-name');
+    expect(session.groups[0]?.files.map((file) => file.included)).toEqual([false, false]);
+    expect(session.groups[1]?.files.map((file) => file.included)).toEqual([false]);
+  });
+
+  it('keeps upload-link and upload-id review files included by default', () => {
+    const uploadLinkSession = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/files/WiseMan/64501'));
+    const uploadIdSession = createReviewSessionFromDryRunPlan(createPlan('64501'));
+
+    expect(uploadLinkSession.sourcePlan.input.kind).toBe('upload-link');
+    expect(uploadLinkSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+    expect(uploadIdSession.sourcePlan.input.kind).toBe('upload-id');
+    expect(uploadIdSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+  });
+
+  it('creates zero planned files from an untouched artist catalog review', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/people/WiseMan'));
+    const plan = buildReviewedDryRunPlan(session, root());
+
+    expect(session.sourcePlan.input.kind).toBe('artist-link');
+    expect(plan.plannedFiles).toEqual([]);
+    expect(plan.warnings).toContain('No files are included in the reviewed dry-run plan.');
+  });
+
   it('marks groups accepted and needs review without removing low-confidence warnings', () => {
     const accepted = markGroupAccepted(createReviewSessionFromDryRunPlan(createPlan()), 'group-a');
     const needsReview = markGroupNeedsReview(accepted, 'group-a');
@@ -115,9 +142,9 @@ describe('review session overrides', () => {
   });
 });
 
-function createPlan(): DryRunPlan {
+function createPlan(rawInput = 'https://ccmixter.org/files/WiseMan/64501'): DryRunPlan {
   return createDryRunPlanFromGroups(
-    'WiseMan',
+    rawInput,
     root(),
     [groupA(), groupB()],
     {

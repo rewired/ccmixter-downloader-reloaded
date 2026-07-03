@@ -121,6 +121,17 @@ h3 {
   gap: 4px;
 }
 
+.artist-scan-banner {
+  gap: 10px;
+}
+
+.artist-catalog-counts {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid #e2b25b;
+  border-radius: 6px;
+  padding: 10px;
+}
+
 .error {
   background: #ffe9e6;
   border: 1px solid #d35f4c;

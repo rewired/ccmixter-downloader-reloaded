@@ -128,7 +128,7 @@ function planWithTargetPath(targetRelativePath: string): DryRunPlan {
 }
 
 function createPlan(options: { includeMissingUrl?: boolean } = {}): DryRunPlan {
-  return createDryRunPlanFromGroups('WiseMan', root(), [groupA(options), groupB()], {
+  return createDryRunPlanFromGroups('https://ccmixter.org/files/WiseMan/64501', root(), [groupA(options), groupB()], {
     createdAt: '2026-07-03T00:00:00.000Z',
     metadataSource: 'api',
     placeholderData: false,

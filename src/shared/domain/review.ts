@@ -10,10 +10,11 @@ import type {
   StemLibraryRoot,
   TrackFile
 } from './models';
-import { buildSongFolderName, sanitizePathSegment } from './planning';
+import { buildSongFolderName, isArtistCatalogInput, sanitizePathSegment } from './planning';
 
 export function createReviewSessionFromDryRunPlan(plan: DryRunPlan): ReviewSession {
-  const groups = plan.groups.map((group) => createReviewGroup(group));
+  const defaultIncluded = !isArtistCatalogInput(plan.input);
+  const groups = plan.groups.map((group) => createReviewGroup(group, undefined, defaultIncluded));
 
   return {
     reviewSessionId: `review-${plan.createdAt}`,
@@ -210,7 +211,8 @@ export function mergeGroups(session: ReviewSession, sourceGroupId: string, targe
 }
 
 export function resetGroupOverrides(session: ReviewSession, groupId: string): ReviewSession {
-  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId));
+  const defaultIncluded = !isArtistCatalogInput(session.sourcePlan.input);
+  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId, defaultIncluded));
 }
 
 export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: StemLibraryRoot): DryRunPlan {
@@ -260,7 +262,7 @@ export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: Stem
   };
 }
 
-function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): ReviewGroup {
+function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId, defaultIncluded = true): ReviewGroup {
   return {
     reviewGroupId,
     originalGroupId: group.groupId,
@@ -268,7 +270,7 @@ function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): Rev
     artistName: group.artist,
     songFolderName: buildSongFolderName(group.canonicalSongTitle, group.bpm),
     status: 'needs-review',
-    files: group.files.map((file, index) => createReviewFile(reviewGroupId, file, index)),
+    files: group.files.map((file, index) => createReviewFile(reviewGroupId, file, index, defaultIncluded)),
     overrides: [],
     overrideWarnings: [],
     warnings: group.warnings,
@@ -276,13 +278,13 @@ function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): Rev
   };
 }
 
-function createReviewFile(groupId: string, file: TrackFile, index: number): ReviewFile {
+function createReviewFile(groupId: string, file: TrackFile, index: number, included: boolean): ReviewFile {
   return {
     fileId: `${groupId}::file::${index}`,
     originalFile: file,
     originalFilename: file.originalFilename,
     targetFilename: file.originalFilename,
-    included: true,
+    included,
     overrideWarnings: [],
     warnings: file.warnings
   };

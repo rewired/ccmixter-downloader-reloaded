@@ -1,4 +1,12 @@
-import type { Confidence, MetadataSourceType, StemGroup, TrackFile, TrackFileKind, TrackUpload } from '../../../shared/domain';
+import {
+  RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
+  type Confidence,
+  type MetadataSourceType,
+  type StemGroup,
+  type TrackFile,
+  type TrackFileKind,
+  type TrackUpload
+} from '../../../shared/domain';
 import type {
   ConfidenceAssessment,
   FileClassificationContext,
@@ -296,7 +304,7 @@ function assessConfidence(
   }
 
   if (signals.some((signal) => signal.reason === 'Related upload link was detected in HTML enrichment.')) {
-    warnings.push('Related upload link detected but not recursively resolved.');
+    warnings.push(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   }
 
   if (titleRoots.size > 1) {

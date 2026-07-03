@@ -4,6 +4,7 @@ import {
   buildPlannedTargetPath,
   buildSongFolderName,
   createDryRunPlanFromFixture,
+  isArtistCatalogInput,
   normalizeSongTitle,
   parseCcmixterInput,
   sanitizePathSegment
@@ -37,6 +38,13 @@ describe('parseCcmixterInput', () => {
       kind: 'artist-name',
       normalizedArtistLogin: 'lukas_engelke'
     });
+  });
+
+  it('identifies artist catalog inputs', () => {
+    expect(isArtistCatalogInput(parseCcmixterInput('https://ccmixter.org/people/WiseMan'))).toBe(true);
+    expect(isArtistCatalogInput(parseCcmixterInput('WiseMan'))).toBe(true);
+    expect(isArtistCatalogInput(parseCcmixterInput('https://ccmixter.org/files/WiseMan/64501'))).toBe(false);
+    expect(isArtistCatalogInput(parseCcmixterInput('64501'))).toBe(false);
   });
 
   it('parses explicit fixture smoke inputs', () => {
