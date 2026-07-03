@@ -7,6 +7,10 @@ export const sampleStemGroups: StemGroup[] = [
     canonicalSongTitle: 'Boxcar heading West (instrumental stems)',
     bpm: 145,
     confidence: 'medium',
+    metadataSource: 'fixture',
+    groupingReasons: ['Fixture group for path planning tests.'],
+    ambiguousUploads: [],
+    unverifiedFields: [],
     warnings: [],
     uploads: [],
     files: [
@@ -14,6 +18,7 @@ export const sampleStemGroups: StemGroup[] = [
         originalFilename: 'GUITAR:main?.flac',
         fileKind: 'stem',
         extension: 'flac',
+        metadataSource: 'fixture',
         warnings: []
       }
     ]

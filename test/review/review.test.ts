@@ -1,0 +1,195 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  buildReviewedDryRunPlan,
+  createDryRunPlanFromGroups,
+  createReviewSessionFromDryRunPlan,
+  markGroupAccepted,
+  markGroupNeedsReview,
+  mergeGroups,
+  renameArtist,
+  renameFile,
+  renameGroup,
+  resetGroupOverrides,
+  splitGroup,
+  toggleFileIncluded,
+  type DryRunPlan,
+  type StemGroup
+} from '../../src/shared/domain';
+
+describe('review session overrides', () => {
+  it('creates review state from a dry-run plan and preserves resolver metadata', () => {
+    const plan = createPlan();
+    const session = createReviewSessionFromDryRunPlan(plan);
+
+    expect(session.groups).toHaveLength(2);
+    expect(session.groups[0]?.originalGroup).toBe(plan.groups[0]);
+    expect(session.groups[0]?.songFolderName).toBe('Boxcar heading West (145 bpm)');
+    expect(session.groups[0]?.files[0]?.originalFile).toBe(plan.groups[0]?.files[0]);
+  });
+
+  it('renames artist, group/song folder, and file without mutating the original session', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const fileId = session.groups[0]!.files[0]!.fileId;
+    const renamed = renameFile(renameGroup(renameArtist(session, 'group-a', 'Edited Artist'), 'group-a', 'Edited Song'), fileId, 'BASS.wav');
+
+    expect(session.groups[0]?.artistName).toBe('Wiseman');
+    expect(renamed.groups[0]?.artistName).toBe('Edited Artist');
+    expect(renamed.groups[0]?.songFolderName).toBe('Edited Song');
+    expect(renamed.groups[0]?.files[0]?.targetFilename).toBe('BASS.wav');
+    expect(renamed.groups[0]?.originalGroup.artist).toBe('Wiseman');
+  });
+
+  it('adds sanitizer warnings for unsafe override names and recomputes planned paths sanitized', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const fileId = session.groups[0]!.files[0]!.fileId;
+    const renamed = renameFile(renameGroup(renameArtist(session, 'group-a', 'Bad:Artist'), 'group-a', 'Song/Name'), fileId, 'BASS?.wav');
+    const plan = buildReviewedDryRunPlan(renamed, root());
+
+    expect(renamed.groups[0]?.overrideWarnings).toContain('artist override "Bad:Artist" will be sanitized to "Bad-Artist".');
+    expect(renamed.groups[0]?.overrideWarnings).toContain('song override "Song/Name" will be sanitized to "Song-Name".');
+    expect(renamed.groups[0]?.files[0]?.overrideWarnings).toContain('file override "BASS?.wav" will be sanitized to "BASS-.wav".');
+    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Bad-Artist/Song-Name/BASS-.wav');
+  });
+
+  it('excludes files from reviewed planned files while keeping them visible in review state', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const fileId = session.groups[0]!.files[1]!.fileId;
+    const updated = toggleFileIncluded(session, fileId);
+    const plan = buildReviewedDryRunPlan(updated, root());
+
+    expect(updated.groups[0]?.files[1]?.included).toBe(false);
+    expect(updated.groups[0]?.files).toHaveLength(2);
+    expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).not.toContain('preview.mp3');
+  });
+
+  it('marks groups accepted and needs review without removing low-confidence warnings', () => {
+    const accepted = markGroupAccepted(createReviewSessionFromDryRunPlan(createPlan()), 'group-a');
+    const needsReview = markGroupNeedsReview(accepted, 'group-a');
+
+    expect(accepted.groups[0]?.status).toBe('accepted');
+    expect(accepted.groups[0]?.warnings).toContain('Low confidence grouping warning.');
+    expect(needsReview.groups[0]?.status).toBe('needs-review');
+  });
+
+  it('splits a group and preserves moved files and warnings', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const movedFileId = session.groups[0]!.files[1]!.fileId;
+    const split = splitGroup(session, 'group-a', [movedFileId]);
+
+    expect(split.groups).toHaveLength(3);
+    expect(split.groups[0]?.files.map((file) => file.originalFilename)).toEqual(['BASS.flac']);
+    expect(split.groups[1]?.files.map((file) => file.originalFilename)).toEqual(['preview.mp3']);
+    expect(split.groups[1]?.warnings).toContain('Group was split manually and needs review.');
+    expect(split.groups[1]?.splitFromGroupId).toBe('group-a');
+  });
+
+  it('merges groups and preserves files and provenance', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const merged = mergeGroups(session, 'group-b', 'group-a');
+
+    expect(merged.groups).toHaveLength(1);
+    expect(merged.groups[0]?.files.map((file) => file.originalFilename)).toEqual(['BASS.flac', 'preview.mp3', 'VOCALS.flac']);
+    expect(merged.groups[0]?.mergedGroupIds).toContain('group-b');
+  });
+
+  it('resets group overrides to resolver defaults', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const fileId = session.groups[0]!.files[0]!.fileId;
+    const renamed = renameFile(renameGroup(renameArtist(session, 'group-a', 'Edited Artist'), 'group-a', 'Edited Song'), fileId, 'BASS.wav');
+    const reset = resetGroupOverrides(renamed, 'group-a');
+
+    expect(reset.groups[0]?.artistName).toBe('Wiseman');
+    expect(reset.groups[0]?.songFolderName).toBe('Boxcar heading West (145 bpm)');
+    expect(reset.groups[0]?.files[0]?.targetFilename).toBe('BASS.flac');
+  });
+
+  it('recomputes reviewed dry-run paths from overrides', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const fileId = session.groups[0]!.files[0]!.fileId;
+    const reviewed = renameFile(renameGroup(renameArtist(session, 'group-a', 'Edited Artist'), 'group-a', 'Edited Song'), fileId, 'BASS.wav');
+    const plan = buildReviewedDryRunPlan(reviewed, root());
+
+    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Edited Artist/Edited Song/BASS.wav');
+    expect(plan.plannedFiles[0]?.targetAbsolutePath).toBe('D:/Stem Library/Edited Artist/Edited Song/BASS.wav');
+  });
+});
+
+function createPlan(): DryRunPlan {
+  return createDryRunPlanFromGroups(
+    'WiseMan',
+    root(),
+    [groupA(), groupB()],
+    {
+      createdAt: '2026-07-03T00:00:00.000Z',
+      metadataSource: 'api',
+      placeholderData: false,
+      resolverStatus: 'resolved',
+      warnings: ['No files will be downloaded.']
+    }
+  );
+}
+
+function root() {
+  return {
+    path: 'D:/Stem Library',
+    selectedAt: '2026-07-03T00:00:00.000Z'
+  };
+}
+
+function groupA(): StemGroup {
+  return {
+    groupId: 'group-a',
+    artist: 'Wiseman',
+    canonicalSongTitle: 'Boxcar heading West',
+    bpm: 145,
+    uploads: [],
+    files: [
+      {
+        originalFilename: 'BASS.flac',
+        fileKind: 'stem',
+        extension: 'flac',
+        metadataSource: 'api',
+        warnings: []
+      },
+      {
+        originalFilename: 'preview.mp3',
+        fileKind: 'preview',
+        extension: 'mp3',
+        metadataSource: 'api',
+        warnings: ['Preview file classification warning.']
+      }
+    ],
+    confidence: 'low',
+    metadataSource: 'api',
+    groupingReasons: ['Same artist and normalized song title root.'],
+    ambiguousUploads: [],
+    unverifiedFields: [],
+    warnings: ['Low confidence grouping warning.']
+  };
+}
+
+function groupB(): StemGroup {
+  return {
+    groupId: 'group-b',
+    artist: 'Wiseman',
+    canonicalSongTitle: 'Boxcar heading West',
+    bpm: 145,
+    uploads: [],
+    files: [
+      {
+        originalFilename: 'VOCALS.flac',
+        fileKind: 'stem',
+        extension: 'flac',
+        metadataSource: 'api',
+        warnings: []
+      }
+    ],
+    confidence: 'medium',
+    metadataSource: 'api',
+    groupingReasons: ['API source/remix relationship references another upload in this group.'],
+    ambiguousUploads: [],
+    unverifiedFields: [],
+    warnings: []
+  };
+}

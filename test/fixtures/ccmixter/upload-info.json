@@ -1,0 +1,24 @@
+[
+  {
+    "upload_id": "64501",
+    "upload_name": "Boxcar heading West (instrumental stems)",
+    "user_name": "WiseMan",
+    "user_real_name": "Wiseman",
+    "upload_bpm": "145",
+    "upload_tags": "stems flac zip",
+    "license_url": "https://creativecommons.org/licenses/by/3.0/",
+    "file_page_url": "https://ccmixter.org/files/WiseMan/64501",
+    "files": [
+      {
+        "file_name": "GUITAR-main.flac",
+        "download_url": "https://ccmixter.org/content/WiseMan/GUITAR-main.flac",
+        "file_size": 2048
+      },
+      {
+        "file_name": "Boxcar-stems.zip",
+        "download_url": "https://ccmixter.org/content/WiseMan/Boxcar-stems.zip",
+        "file_size": 4096
+      }
+    ]
+  }
+]

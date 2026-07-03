@@ -7,7 +7,7 @@ import type {
   IpcResult
 } from '../shared/ipc';
 import { IPC_CHANNELS } from '../shared/ipc';
-import type { CcmixterInput, DryRunPlan, StemLibraryRoot } from '../shared/domain';
+import type { CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata, StemLibraryRoot } from '../shared/domain';
 
 const api: CcmixterDownloaderApi = {
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo) as Promise<AppInfo>,
@@ -17,6 +17,8 @@ const api: CcmixterDownloaderApi = {
   setStemLibraryRoot: (path: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.setStemLibraryRoot, path) as Promise<IpcResult<StemLibraryRoot>>,
   parseInput: (rawInput: string) => ipcRenderer.invoke(IPC_CHANNELS.parseInput, rawInput) as Promise<CcmixterInput>,
+  resolveMetadata: (rawInput: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.resolveMetadata, rawInput) as Promise<IpcResult<ResolvedCcmixterMetadata>>,
   createDryRunPlan: (rawInput: string, rootFolder: StemLibraryRoot | null) =>
     ipcRenderer.invoke(IPC_CHANNELS.createDryRunPlan, rawInput, rootFolder) as Promise<IpcResult<DryRunPlan>>
 };

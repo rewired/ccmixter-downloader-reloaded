@@ -1,4 +1,4 @@
-import type { AppError, CcmixterInput, DryRunPlan, StemLibraryRoot } from '../domain';
+import type { AppError, CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata, StemLibraryRoot } from '../domain';
 
 export const IPC_CHANNELS = {
   getAppInfo: 'app:get-info',
@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   getStemLibraryRoot: 'stem-library:get-root',
   setStemLibraryRoot: 'stem-library:set-root',
   parseInput: 'ccmixter:parse-input',
+  resolveMetadata: 'ccmixter:resolve-metadata',
   createDryRunPlan: 'ccmixter:create-dry-run-plan'
 } as const;
 
@@ -35,5 +36,6 @@ export interface CcmixterDownloaderApi {
   getStemLibraryRoot(): Promise<StemLibraryRoot | null>;
   setStemLibraryRoot(path: string): Promise<IpcResult<StemLibraryRoot>>;
   parseInput(rawInput: string): Promise<CcmixterInput>;
+  resolveMetadata(rawInput: string): Promise<IpcResult<ResolvedCcmixterMetadata>>;
   createDryRunPlan(rawInput: string, rootFolder: StemLibraryRoot | null): Promise<IpcResult<DryRunPlan>>;
 }

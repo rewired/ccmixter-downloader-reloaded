@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import path from 'path';
 
-import { createDryRunPlanFromFixture, parseCcmixterInput, type AppError, type StemLibraryRoot } from '../shared/domain';
+import { parseCcmixterInput, type AppError, type DryRunPlan, type ResolvedCcmixterMetadata, type StemLibraryRoot } from '../shared/domain';
 import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
-import { SAMPLE_STEM_GROUPS } from './sample-data';
+import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
 import { SettingsStore } from './settings';
 
 let settingsStore: SettingsStore;
+const ccmixterResolver = new CcmixterResolver();
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
@@ -98,9 +99,20 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.parseInput, (_event, rawInput: string) => parseCcmixterInput(rawInput));
 
+  ipcMain.handle(IPC_CHANNELS.resolveMetadata, async (_event, rawInput: string): Promise<IpcResult<ResolvedCcmixterMetadata>> => {
+    try {
+      return {
+        ok: true,
+        value: await ccmixterResolver.resolveMetadata(rawInput)
+      };
+    } catch (error) {
+      return errorResult('CCMIXTER_METADATA_RESOLVE_FAILED', 'ccMixter metadata could not be resolved.', true, error);
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.createDryRunPlan,
-    (_event, rawInput: string, rootFolder: StemLibraryRoot | null): IpcResult<ReturnType<typeof createDryRunPlanFromFixture>> => {
+    async (_event, rawInput: string, rootFolder: StemLibraryRoot | null): Promise<IpcResult<DryRunPlan>> => {
       if (!rootFolder || !isValidFolderPath(rootFolder.path)) {
         return errorResult(
           'STEM_LIBRARY_ROOT_REQUIRED',
@@ -109,10 +121,14 @@ function registerIpcHandlers(): void {
         );
       }
 
-      return {
-        ok: true,
-        value: createDryRunPlanFromFixture(rawInput, rootFolder, SAMPLE_STEM_GROUPS)
-      };
+      try {
+        return {
+          ok: true,
+          value: await ccmixterResolver.createDryRunPlan(rawInput, rootFolder)
+        };
+      } catch (error) {
+        return errorResult('CCMIXTER_DRY_RUN_FAILED', 'Dry-run metadata planning failed.', true, error);
+      }
     }
   );
 }

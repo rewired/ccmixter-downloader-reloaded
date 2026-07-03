@@ -7,6 +7,9 @@ export const SAMPLE_STEM_GROUPS: StemGroup[] = [
     canonicalSongTitle: 'Quarter-Inch Jack (Source)',
     bpm: 96,
     confidence: 'low',
+    groupingReasons: ['Fixture group only: no resolver grouping decision was made.'],
+    ambiguousUploads: [],
+    unverifiedFields: ['licenseSummary'],
     warnings: [
       'Fixture group only: grouping has not been resolved from the ccMixter API or upload pages.',
       'License summary is a placeholder and must not be treated as verified.'
@@ -21,6 +24,7 @@ export const SAMPLE_STEM_GROUPS: StemGroup[] = [
         tags: ['fixture', 'stems', 'zip'],
         licenseSummary: 'Unverified placeholder license summary',
         sourceUrl: 'https://ccmixter.org/files/sample_artist/000000',
+        metadataSource: 'fixture',
         warnings: ['Upload metadata is fixture/sample data only.']
       }
     ],
@@ -30,6 +34,7 @@ export const SAMPLE_STEM_GROUPS: StemGroup[] = [
         fileKind: 'stem',
         extension: 'flac',
         qualityHint: 'fixture lossless source hint',
+        metadataSource: 'fixture',
         warnings: ['File metadata is fixture/sample data only.']
       },
       {
@@ -37,6 +42,7 @@ export const SAMPLE_STEM_GROUPS: StemGroup[] = [
         fileKind: 'stem',
         extension: 'flac',
         qualityHint: 'fixture lossless source hint',
+        metadataSource: 'fixture',
         warnings: ['File metadata is fixture/sample data only.']
       },
       {
@@ -44,8 +50,10 @@ export const SAMPLE_STEM_GROUPS: StemGroup[] = [
         fileKind: 'preview',
         extension: 'mp3',
         qualityHint: 'fixture preview hint',
+        metadataSource: 'fixture',
         warnings: ['Preview/stem classification is not verified.']
       }
-    ]
+    ],
+    metadataSource: 'fixture'
   }
 ];

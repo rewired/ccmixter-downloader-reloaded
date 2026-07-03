@@ -1,6 +1,26 @@
 import { useEffect, useState } from 'react';
 
-import type { AppError, CcmixterInput, DryRunPlan, StemLibraryRoot } from '../../shared/domain';
+import {
+  buildReviewedDryRunPlan,
+  createReviewSessionFromDryRunPlan,
+  markGroupAccepted,
+  markGroupNeedsReview,
+  mergeGroups,
+  renameArtist,
+  renameFile,
+  renameGroup,
+  resetGroupOverrides,
+  splitGroup,
+  toggleFileIncluded,
+  type AppError,
+  type CcmixterInput,
+  type DryRunPlan,
+  type ResolvedCcmixterMetadata,
+  type ReviewGroup,
+  type ReviewSession,
+  type StemGroup,
+  type StemLibraryRoot
+} from '../../shared/domain';
 import type { AppInfo } from '../../shared/ipc';
 
 type Status = 'idle' | 'loading' | 'error';
@@ -12,7 +32,9 @@ export function App(): JSX.Element {
   const [rawInput, setRawInput] = useState('https://ccmixter.org/files/sample_artist/000000');
   const [stemLibraryRoot, setStemLibraryRoot] = useState<StemLibraryRoot | null>(null);
   const [parsedInput, setParsedInput] = useState<CcmixterInput | null>(null);
+  const [resolvedMetadata, setResolvedMetadata] = useState<ResolvedCcmixterMetadata | null>(null);
   const [dryRunPlan, setDryRunPlan] = useState<DryRunPlan | null>(null);
+  const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
 
@@ -55,6 +77,8 @@ export function App(): JSX.Element {
       if (!result.cancelled) {
         setStemLibraryRoot(result.root);
         setDryRunPlan(null);
+        setResolvedMetadata(null);
+        setReviewSession(null);
       }
 
       setStatus('idle');
@@ -71,9 +95,35 @@ export function App(): JSX.Element {
     try {
       const parsed = await window.ccmixterDownloader.parseInput(rawInput);
       setParsedInput(parsed);
+      setResolvedMetadata(null);
+      setReviewSession(null);
       setStatus('idle');
     } catch (parseError) {
       setError(toAppError(parseError));
+      setStatus('error');
+    }
+  }
+
+  async function resolveMetadata(): Promise<void> {
+    setStatus('loading');
+    setError(null);
+
+    try {
+      const metadataResult = await window.ccmixterDownloader.resolveMetadata(rawInput);
+
+      if (!metadataResult.ok) {
+        setError(metadataResult.error);
+        setStatus('error');
+        return;
+      }
+
+      setParsedInput(metadataResult.value.input);
+      setResolvedMetadata(metadataResult.value);
+      setDryRunPlan(null);
+      setReviewSession(null);
+      setStatus('idle');
+    } catch (resolveError) {
+      setError(toAppError(resolveError));
       setStatus('error');
     }
   }
@@ -92,7 +142,9 @@ export function App(): JSX.Element {
       }
 
       setParsedInput(planResult.value.input);
+      setResolvedMetadata(null);
       setDryRunPlan(planResult.value);
+      setReviewSession(createReviewSessionFromDryRunPlan(planResult.value));
       setStatus('idle');
     } catch (planError) {
       setError(toAppError(planError));
@@ -101,6 +153,8 @@ export function App(): JSX.Element {
   }
 
   const canCreateDryRun = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
+  const reviewedDryRunPlan =
+    dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, dryRunPlan.stemLibraryRoot) : dryRunPlan;
 
   return (
     <main className="app-shell">
@@ -142,6 +196,9 @@ export function App(): JSX.Element {
             <button type="button" className="secondary" onClick={() => void parseInput()} disabled={status === 'loading'}>
               Parse input
             </button>
+            <button type="button" className="secondary" onClick={() => void resolveMetadata()} disabled={status === 'loading'}>
+              Resolve metadata
+            </button>
             <button type="button" onClick={() => void createDryRunPlan()} disabled={!canCreateDryRun}>
               Create dry run
             </button>
@@ -173,6 +230,14 @@ export function App(): JSX.Element {
                   <dt>Upload ID</dt>
                   <dd>{parsedInput.uploadId ?? 'not specified'}</dd>
                 </div>
+                <div>
+                  <dt>Resolver status</dt>
+                  <dd>{dryRunPlan?.resolverStatus ?? resolvedMetadata?.status ?? 'not run'}</dd>
+                </div>
+                <div>
+                  <dt>Source type</dt>
+                  <dd>{dryRunPlan?.metadataSource ?? resolvedMetadata?.metadataSource ?? 'unresolved'}</dd>
+                </div>
               </dl>
             ) : (
               <p className="empty">Enter a ccMixter input and parse it to see the local interpretation.</p>
@@ -184,18 +249,34 @@ export function App(): JSX.Element {
             {dryRunPlan ? (
               <>
                 <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
+                {reviewSession ? (
+                  <ReviewGroupList reviewSession={reviewSession} onChange={setReviewSession} />
+                ) : (
+                  <GroupList groups={dryRunPlan.groups} />
+                )}
                 <ul className="path-list">
-                  {dryRunPlan.plannedFiles.map((file) => (
+                  {reviewedDryRunPlan?.plannedFiles.map((file) => (
                     <li key={file.targetRelativePath}>
                       <span>{file.targetRelativePath}</span>
                     </li>
                   ))}
                 </ul>
                 <ul className="warning-list">
-                  {dryRunPlan.warnings.map((warning) => (
+                  {reviewedDryRunPlan?.warnings.map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>
+              </>
+            ) : resolvedMetadata ? (
+              <>
+                <GroupList groups={resolvedMetadata.groups} />
+                {resolvedMetadata.warnings.length > 0 ? (
+                  <ul className="warning-list">
+                    {resolvedMetadata.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </>
             ) : (
               <p className="empty">
@@ -206,6 +287,298 @@ export function App(): JSX.Element {
         </section>
       </section>
     </main>
+  );
+}
+
+function ReviewGroupList({
+  reviewSession,
+  onChange
+}: {
+  reviewSession: ReviewSession;
+  onChange: (session: ReviewSession) => void;
+}): JSX.Element {
+  if (reviewSession.groups.length === 0) {
+    return <p className="empty">No review groups are available yet.</p>;
+  }
+
+  return (
+    <div className="group-list">
+      {reviewSession.groups.map((group) => {
+        const availableMergeTargets = reviewSession.groups.filter((candidate) => candidate.reviewGroupId !== group.reviewGroupId);
+
+        return (
+          <section className="group-summary" key={group.reviewGroupId}>
+            <div className="group-heading">
+              <div>
+                <h3>{group.songFolderName}</h3>
+                <span>{group.artistName}</span>
+              </div>
+              <span className={`source-badge status-${group.status}`}>{group.status}</span>
+            </div>
+
+            <div className="review-actions">
+              <button type="button" className="secondary" onClick={() => onChange(markGroupAccepted(reviewSession, group.reviewGroupId))}>
+                Accept
+              </button>
+              <button type="button" className="secondary" onClick={() => onChange(markGroupNeedsReview(reviewSession, group.reviewGroupId))}>
+                Needs review
+              </button>
+              <button type="button" className="secondary" onClick={() => onChange(resetGroupOverrides(reviewSession, group.reviewGroupId))}>
+                Reset
+              </button>
+              {availableMergeTargets.length > 0 ? (
+                <select
+                  aria-label={`Merge ${group.songFolderName}`}
+                  defaultValue=""
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      onChange(mergeGroups(reviewSession, group.reviewGroupId, event.target.value));
+                      event.target.value = '';
+                    }
+                  }}
+                >
+                  <option value="">Merge into...</option>
+                  {availableMergeTargets.map((targetGroup) => (
+                    <option key={targetGroup.reviewGroupId} value={targetGroup.reviewGroupId}>
+                      {targetGroup.songFolderName}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+
+            <div className="edit-grid">
+              <label className="field">
+                <span>Artist folder</span>
+                <input
+                  value={group.artistName}
+                  onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
+                />
+              </label>
+              <label className="field">
+                <span>Song folder</span>
+                <input
+                  value={group.songFolderName}
+                  onChange={(event) => onChange(renameGroup(reviewSession, group.reviewGroupId, event.target.value))}
+                />
+              </label>
+            </div>
+
+            {group.artistName !== group.originalGroup.artist || group.songFolderName !== group.originalGroup.canonicalSongTitle ? (
+              <p className="original-note">
+                Resolver: {group.originalGroup.artist} / {group.originalGroup.canonicalSongTitle}
+              </p>
+            ) : null}
+
+            <ReviewMetadata group={group} />
+
+            <ul className="candidate-list">
+              {group.files.map((file) => (
+                <li className={file.included ? undefined : 'excluded-file'} key={file.fileId}>
+                  <label className="file-toggle">
+                    <input
+                      checked={file.included}
+                      onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
+                      type="checkbox"
+                    />
+                    <span>{file.included ? 'Included' : 'Excluded'}</span>
+                  </label>
+                  <label className="field file-name-field">
+                    <span>Target file name</span>
+                    <input
+                      value={file.targetFilename}
+                      onChange={(event) => onChange(renameFile(reviewSession, file.fileId, event.target.value))}
+                    />
+                  </label>
+                  {file.targetFilename !== file.originalFilename ? <small>Original: {file.originalFilename}</small> : null}
+                  <small>
+                    {file.originalFile.fileKind} / {file.originalFile.extension} / {file.originalFile.metadataSource}
+                  </small>
+                  {group.files.length > 1 ? (
+                    <button
+                      type="button"
+                      className="secondary compact-button"
+                      onClick={() => onChange(splitGroup(reviewSession, group.reviewGroupId, [file.fileId]))}
+                    >
+                      Split to new group
+                    </button>
+                  ) : null}
+                  {file.overrideWarnings.length > 0 ? (
+                    <ul className="warning-list">
+                      {file.overrideWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+
+            {group.overrideWarnings.length > 0 ? (
+              <ul className="warning-list">
+                {group.overrideWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+            {group.warnings.length > 0 ? (
+              <ul className="warning-list">
+                {group.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReviewMetadata({ group }: { group: ReviewGroup }): JSX.Element {
+  const firstUpload = group.originalGroup.uploads[0];
+
+  return (
+    <>
+      <dl className="details compact">
+        <div>
+          <dt>Confidence</dt>
+          <dd>{group.originalGroup.confidence}</dd>
+        </div>
+        <div>
+          <dt>BPM</dt>
+          <dd>{group.originalGroup.bpm ?? 'not specified'}</dd>
+        </div>
+        <div>
+          <dt>License</dt>
+          <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>{group.originalGroup.metadataSource}</dd>
+        </div>
+      </dl>
+      {group.originalGroup.groupingReasons.length > 0 ? (
+        <div className="reason-block">
+          <span className="field-label">Grouping reasons</span>
+          <ul className="reason-list">
+            {group.originalGroup.groupingReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {group.originalGroup.ambiguousUploads.length > 0 ? (
+        <div className="reason-block">
+          <span className="field-label">Ambiguous uploads</span>
+          <ul className="reason-list">
+            {group.originalGroup.ambiguousUploads.map((upload) => (
+              <li key={upload.uploadId}>
+                {upload.title} ({upload.uploadId})
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function GroupList({ groups }: { groups: StemGroup[] }): JSX.Element {
+  if (groups.length === 0) {
+    return <p className="empty">No resolver groups are available yet.</p>;
+  }
+
+  return (
+    <div className="group-list">
+      {groups.map((group) => {
+        const firstUpload = group.uploads[0];
+
+        return (
+          <section className="group-summary" key={group.groupId}>
+            <div className="group-heading">
+              <div>
+                <h3>{group.canonicalSongTitle}</h3>
+                <span>{group.artist}</span>
+              </div>
+              <span className="source-badge">{group.metadataSource}</span>
+            </div>
+            <dl className="details compact">
+              <div>
+                <dt>Confidence</dt>
+                <dd>{group.confidence}</dd>
+              </div>
+              <div>
+                <dt>BPM</dt>
+                <dd>{group.bpm ?? 'not specified'}</dd>
+              </div>
+              <div>
+                <dt>License</dt>
+                <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
+              </div>
+              <div>
+                <dt>Tags</dt>
+                <dd>{firstUpload && firstUpload.tags.length > 0 ? firstUpload.tags.join(', ') : 'not specified'}</dd>
+              </div>
+            </dl>
+            {group.uploads.some((upload) => upload.title !== group.canonicalSongTitle) ? (
+              <div className="title-map">
+                <span className="field-label">Original upload titles</span>
+                <ul>
+                  {group.uploads.map((upload) => (
+                    <li key={upload.uploadId}>
+                      <span>{upload.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {group.groupingReasons.length > 0 ? (
+              <div className="reason-block">
+                <span className="field-label">Grouping reasons</span>
+                <ul className="reason-list">
+                  {group.groupingReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <ul className="candidate-list">
+              {group.files.map((file) => (
+                <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`}>
+                  <span>{file.originalFilename}</span>
+                  <small>
+                    {file.fileKind} / {file.extension} / {file.metadataSource}
+                  </small>
+                </li>
+              ))}
+            </ul>
+            {group.unverifiedFields.length > 0 ? (
+              <p className="unverified">Unverified: {group.unverifiedFields.join(', ')}</p>
+            ) : null}
+            {group.ambiguousUploads.length > 0 ? (
+              <div className="reason-block">
+                <span className="field-label">Ambiguous uploads</span>
+                <ul className="reason-list">
+                  {group.ambiguousUploads.map((upload) => (
+                    <li key={upload.uploadId}>
+                      {upload.title} ({upload.uploadId})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {group.warnings.length > 0 ? (
+              <ul className="warning-list">
+                {group.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

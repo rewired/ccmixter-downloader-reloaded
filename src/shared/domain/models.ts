@@ -19,6 +19,8 @@ export interface StemLibraryRoot {
   selectedAt: string;
 }
 
+export type MetadataSourceType = 'api' | 'html-enriched' | 'fixture' | 'unresolved';
+
 export interface TrackUpload {
   uploadId: string;
   artistName: string;
@@ -28,6 +30,11 @@ export interface TrackUpload {
   tags: string[];
   licenseSummary: string;
   sourceUrl: string;
+  metadataSource: MetadataSourceType;
+  uploadedAt?: string;
+  relatedUploadUrls?: string[];
+  sourceUploadIds?: string[];
+  remixOfUploadIds?: string[];
   warnings: string[];
 }
 
@@ -40,6 +47,8 @@ export interface TrackFile {
   sizeBytes?: number;
   downloadUrl?: string;
   qualityHint?: string;
+  metadataSource: MetadataSourceType;
+  zipFileHints?: string[];
   warnings: string[];
 }
 
@@ -53,6 +62,10 @@ export interface StemGroup {
   uploads: TrackUpload[];
   files: TrackFile[];
   confidence: Confidence;
+  metadataSource: MetadataSourceType;
+  groupingReasons: string[];
+  ambiguousUploads: TrackUpload[];
+  unverifiedFields: string[];
   warnings: string[];
 }
 
@@ -74,7 +87,84 @@ export interface DryRunPlan {
   plannedFiles: PlannedFile[];
   warnings: string[];
   createdAt: string;
-  placeholderData: true;
+  placeholderData: boolean;
+  resolverStatus: 'resolved' | 'partial' | 'unresolved' | 'fixture';
+  metadataSource: MetadataSourceType;
+}
+
+export interface ResolvedCcmixterMetadata {
+  input: CcmixterInput;
+  groups: StemGroup[];
+  uploads: TrackUpload[];
+  files: TrackFile[];
+  warnings: string[];
+  status: DryRunPlan['resolverStatus'];
+  metadataSource: MetadataSourceType;
+  createdAt: string;
+}
+
+export type ReviewGroupStatus = 'needs-review' | 'accepted';
+
+export interface RenameOverride {
+  kind: 'rename';
+  target: 'artist' | 'song' | 'file';
+  targetId: string;
+  originalValue: string;
+  nextValue: string;
+  sanitizedValue: string;
+  warnings: string[];
+}
+
+export interface GroupOverride {
+  kind: 'group';
+  action: 'split' | 'merge' | 'reset' | 'accept' | 'needs-review';
+  groupId: string;
+  affectedGroupIds: string[];
+  warnings: string[];
+}
+
+export interface FileSelectionOverride {
+  kind: 'file-selection';
+  fileId: string;
+  included: boolean;
+  warnings: string[];
+}
+
+export type ReviewOverride = RenameOverride | GroupOverride | FileSelectionOverride;
+
+export interface ReviewFile {
+  fileId: string;
+  originalFile: TrackFile;
+  originalFilename: string;
+  targetFilename: string;
+  included: boolean;
+  overrideWarnings: string[];
+  warnings: string[];
+}
+
+export interface ReviewGroup {
+  reviewGroupId: string;
+  originalGroupId: string;
+  originalGroup: StemGroup;
+  artistName: string;
+  songFolderName: string;
+  status: ReviewGroupStatus;
+  files: ReviewFile[];
+  overrides: ReviewOverride[];
+  overrideWarnings: string[];
+  warnings: string[];
+  splitFromGroupId?: string;
+  mergedGroupIds: string[];
+}
+
+export interface ReviewSession {
+  reviewSessionId: string;
+  sourcePlan: DryRunPlan;
+  groups: ReviewGroup[];
+  overrides: ReviewOverride[];
+  warnings: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AppError {

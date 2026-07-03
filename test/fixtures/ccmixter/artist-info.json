@@ -1,0 +1,34 @@
+[
+  {
+    "upload_id": "64501",
+    "upload_name": "Boxcar heading West (instrumental stems)",
+    "user_name": "WiseMan",
+    "user_real_name": "Wiseman",
+    "upload_bpm": 145,
+    "upload_tags": ["stems", "flac"],
+    "license_name": "Creative Commons Attribution",
+    "file_page_url": "https://ccmixter.org/files/WiseMan/64501",
+    "files": [
+      {
+        "file_name": "GUITAR-main.flac",
+        "download_url": "https://ccmixter.org/content/WiseMan/GUITAR-main.flac"
+      }
+    ]
+  },
+  {
+    "upload_id": "64502",
+    "upload_name": "Boxcar heading West (pells)",
+    "user_name": "WiseMan",
+    "user_real_name": "Wiseman",
+    "upload_bpm": 145,
+    "upload_tags": ["pells", "vocals"],
+    "license_name": "Creative Commons Attribution",
+    "file_page_url": "https://ccmixter.org/files/WiseMan/64502",
+    "files": [
+      {
+        "file_name": "VOCALS.flac",
+        "download_url": "https://ccmixter.org/content/WiseMan/VOCALS.flac"
+      }
+    ]
+  }
+]

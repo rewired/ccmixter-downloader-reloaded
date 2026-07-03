@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -30,6 +30,24 @@ describe('SettingsStore', () => {
 
     expect(saved.path).toBe(rootPath);
     await expect(store.getStemLibraryRoot()).resolves.toEqual(saved);
+  });
+
+  it('reads settings files with a UTF-8 BOM', async () => {
+    const dir = await createTempDir();
+    const rootPath = path.join(dir, 'Stem Library');
+    const selectedAt = '2026-07-03T00:00:00.000Z';
+    const store = new SettingsStore(dir);
+
+    await writeFile(
+      path.join(dir, 'settings.json'),
+      `\uFEFF${JSON.stringify({ stemLibraryRoot: { path: rootPath, selectedAt } })}`,
+      'utf8'
+    );
+
+    await expect(store.getStemLibraryRoot()).resolves.toEqual({
+      path: rootPath,
+      selectedAt
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import type {
   CcmixterInput,
   DryRunPlan,
+  MetadataSourceType,
   PlannedFile,
   StemGroup,
   StemLibraryRoot,
@@ -8,7 +9,7 @@ import type {
 } from './models';
 
 const SOURCE_SUFFIX_PATTERN =
-  /\s*(?:\((?:source|sources|pells|acapella|a cappella|instrumental stems?|stems?)\)|\[(?:source|sources|pells|acapella|a cappella|instrumental stems?|stems?)\])\s*$/i;
+  /\s*(?:\((?:source|sources|stems?|instrumental stems?|pells|acapella|a cappella|vocals|instrumental)\)|\[(?:source|sources|stems?|instrumental stems?|pells|acapella|a cappella|vocals|instrumental)\]|-\s*(?:source|sources|stems?))\s*$/i;
 
 const WINDOWS_RESERVED_NAMES = new Set([
   'CON',
@@ -123,7 +124,35 @@ export function createDryRunPlanFromFixture(
   groups: StemGroup[],
   createdAt = new Date().toISOString()
 ): DryRunPlan {
-  const input = parseCcmixterInput(rawInput);
+  return createDryRunPlanFromGroups(rawInput, stemLibraryRoot, groups, {
+    createdAt,
+    metadataSource: 'fixture',
+    placeholderData: true,
+    resolverStatus: 'fixture',
+    warnings: [
+      'Dry run only: fixture/sample data is shown as a placeholder.',
+      'No ccMixter scan happened.',
+      'No files will be downloaded.',
+      'No ZIP extraction happened.',
+      'No attribution files were written.'
+    ]
+  });
+}
+
+export function createDryRunPlanFromGroups(
+  rawInput: string,
+  stemLibraryRoot: StemLibraryRoot,
+  groups: StemGroup[],
+  options: {
+    createdAt?: string;
+    input?: CcmixterInput;
+    metadataSource: MetadataSourceType;
+    placeholderData: boolean;
+    resolverStatus: DryRunPlan['resolverStatus'];
+    warnings: string[];
+  }
+): DryRunPlan {
+  const input = options.input ?? parseCcmixterInput(rawInput);
   const plannedFiles: PlannedFile[] = groups.flatMap((group) =>
     group.files.map((sourceFile) => {
       const targetRelativePath = buildPlannedTargetPath(group, sourceFile);
@@ -144,15 +173,11 @@ export function createDryRunPlanFromFixture(
     targetDirectory: stemLibraryRoot.path,
     groups,
     plannedFiles,
-    warnings: [
-      'Dry run only: fixture/sample data is shown as a placeholder.',
-      'No ccMixter scan happened.',
-      'No files will be downloaded.',
-      'No ZIP extraction happened.',
-      'No attribution files were written.'
-    ],
-    createdAt,
-    placeholderData: true
+    warnings: options.warnings,
+    createdAt: options.createdAt ?? new Date().toISOString(),
+    placeholderData: options.placeholderData,
+    resolverStatus: options.resolverStatus,
+    metadataSource: options.metadataSource
   };
 }
 

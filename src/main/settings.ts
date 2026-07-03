@@ -37,7 +37,7 @@ export class SettingsStore {
   private async readSettings(): Promise<SettingsFile> {
     try {
       const contents = await fs.readFile(this.settingsPath, 'utf8');
-      const parsed = JSON.parse(contents) as Partial<SettingsFile>;
+      const parsed = JSON.parse(stripUtf8Bom(contents)) as Partial<SettingsFile>;
 
       return {
         stemLibraryRoot: parsed.stemLibraryRoot ?? null
@@ -61,4 +61,8 @@ export class SettingsStore {
 
 function isNotFoundError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+function stripUtf8Bom(contents: string): string {
+  return contents.charCodeAt(0) === 0xfeff ? contents.slice(1) : contents;
 }
