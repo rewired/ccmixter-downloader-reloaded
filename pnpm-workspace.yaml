@@ -1,3 +1,5 @@
+nodeLinker: hoisted
+
 onlyBuiltDependencies:
   - electron
   - esbuild
