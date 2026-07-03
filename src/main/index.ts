@@ -1,13 +1,28 @@
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import path from 'path';
 
-import { parseCcmixterInput, type AppError, type DryRunPlan, type ResolvedCcmixterMetadata, type StemLibraryRoot } from '../shared/domain';
+import {
+  parseCcmixterInput,
+  type AppError,
+  type DownloadJob,
+  type DownloadProgress,
+  type DownloadQueueState,
+  type DownloadResult,
+  type DryRunPlan,
+  type ResolvedCcmixterMetadata,
+  type StemLibraryRoot
+} from '../shared/domain';
 import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
 import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
+import { DownloadManager } from './services/download/downloadManager';
 import { SettingsStore } from './settings';
 
 let settingsStore: SettingsStore;
 const ccmixterResolver = new CcmixterResolver();
+const downloadManager = new DownloadManager({
+  onProgress: (progress) => broadcastToRenderer(IPC_CHANNELS.downloadProgress, progress),
+  onCompleted: (result) => broadcastToRenderer(IPC_CHANNELS.downloadCompleted, result)
+});
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
@@ -131,6 +146,48 @@ function registerIpcHandlers(): void {
       }
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.createDownloadJob, async (_event, reviewedPlan: DryRunPlan): Promise<IpcResult<DownloadJob>> => {
+    try {
+      const persistedRoot = await settingsStore.getStemLibraryRoot();
+      if (!persistedRoot || persistedRoot.path !== reviewedPlan.stemLibraryRoot.path) {
+        return errorResult(
+          'STEM_LIBRARY_ROOT_MISMATCH',
+          'The reviewed plan does not match the selected Stem Library Root Folder.',
+          true
+        );
+      }
+
+      return {
+        ok: true,
+        value: await downloadManager.createJobFromReviewedPlan(reviewedPlan)
+      };
+    } catch (error) {
+      return errorResult('DOWNLOAD_JOB_CREATE_FAILED', 'Download job could not be created.', true, error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.startDownloadJob, async (_event, jobId: string): Promise<IpcResult<DownloadQueueState>> => {
+    try {
+      return {
+        ok: true,
+        value: await downloadManager.startDownloadJob(jobId)
+      };
+    } catch (error) {
+      return errorResult('DOWNLOAD_JOB_START_FAILED', 'Download job could not be started.', true, error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cancelDownloadJob, async (_event, jobId: string): Promise<IpcResult<DownloadQueueState>> => {
+    try {
+      return {
+        ok: true,
+        value: await downloadManager.cancelDownloadJob(jobId)
+      };
+    } catch (error) {
+      return errorResult('DOWNLOAD_JOB_CANCEL_FAILED', 'Download job could not be cancelled.', true, error);
+    }
+  });
 }
 
 function isValidFolderPath(folderPath: string): boolean {
@@ -149,4 +206,12 @@ function errorResult<T>(code: string, message: string, recoverable: boolean, err
     ok: false,
     error: appError
   };
+}
+
+function broadcastToRenderer(channel: typeof IPC_CHANNELS.downloadProgress, payload: DownloadProgress): void;
+function broadcastToRenderer(channel: typeof IPC_CHANNELS.downloadCompleted, payload: DownloadResult): void;
+function broadcastToRenderer(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel, payload);
+  }
 }

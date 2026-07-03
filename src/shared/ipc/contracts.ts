@@ -1,4 +1,14 @@
-import type { AppError, CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata, StemLibraryRoot } from '../domain';
+import type {
+  AppError,
+  CcmixterInput,
+  DownloadJob,
+  DownloadProgress,
+  DownloadQueueState,
+  DownloadResult,
+  DryRunPlan,
+  ResolvedCcmixterMetadata,
+  StemLibraryRoot
+} from '../domain';
 
 export const IPC_CHANNELS = {
   getAppInfo: 'app:get-info',
@@ -7,7 +17,12 @@ export const IPC_CHANNELS = {
   setStemLibraryRoot: 'stem-library:set-root',
   parseInput: 'ccmixter:parse-input',
   resolveMetadata: 'ccmixter:resolve-metadata',
-  createDryRunPlan: 'ccmixter:create-dry-run-plan'
+  createDryRunPlan: 'ccmixter:create-dry-run-plan',
+  createDownloadJob: 'download:create-job',
+  startDownloadJob: 'download:start-job',
+  cancelDownloadJob: 'download:cancel-job',
+  downloadProgress: 'download:progress',
+  downloadCompleted: 'download:completed'
 } as const;
 
 export interface AppInfo {
@@ -38,4 +53,9 @@ export interface CcmixterDownloaderApi {
   parseInput(rawInput: string): Promise<CcmixterInput>;
   resolveMetadata(rawInput: string): Promise<IpcResult<ResolvedCcmixterMetadata>>;
   createDryRunPlan(rawInput: string, rootFolder: StemLibraryRoot | null): Promise<IpcResult<DryRunPlan>>;
+  createDownloadJob(reviewedPlan: DryRunPlan): Promise<IpcResult<DownloadJob>>;
+  startDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
+  cancelDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
+  onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
+  onDownloadCompleted(callback: (result: DownloadResult) => void): () => void;
 }

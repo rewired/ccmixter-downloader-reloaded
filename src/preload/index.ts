@@ -7,7 +7,16 @@ import type {
   IpcResult
 } from '../shared/ipc';
 import { IPC_CHANNELS } from '../shared/ipc';
-import type { CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata, StemLibraryRoot } from '../shared/domain';
+import type {
+  CcmixterInput,
+  DownloadJob,
+  DownloadProgress,
+  DownloadQueueState,
+  DownloadResult,
+  DryRunPlan,
+  ResolvedCcmixterMetadata,
+  StemLibraryRoot
+} from '../shared/domain';
 
 const api: CcmixterDownloaderApi = {
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo) as Promise<AppInfo>,
@@ -20,7 +29,23 @@ const api: CcmixterDownloaderApi = {
   resolveMetadata: (rawInput: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.resolveMetadata, rawInput) as Promise<IpcResult<ResolvedCcmixterMetadata>>,
   createDryRunPlan: (rawInput: string, rootFolder: StemLibraryRoot | null) =>
-    ipcRenderer.invoke(IPC_CHANNELS.createDryRunPlan, rawInput, rootFolder) as Promise<IpcResult<DryRunPlan>>
+    ipcRenderer.invoke(IPC_CHANNELS.createDryRunPlan, rawInput, rootFolder) as Promise<IpcResult<DryRunPlan>>,
+  createDownloadJob: (reviewedPlan: DryRunPlan) =>
+    ipcRenderer.invoke(IPC_CHANNELS.createDownloadJob, reviewedPlan) as Promise<IpcResult<DownloadJob>>,
+  startDownloadJob: (jobId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.startDownloadJob, jobId) as Promise<IpcResult<DownloadQueueState>>,
+  cancelDownloadJob: (jobId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelDownloadJob, jobId) as Promise<IpcResult<DownloadQueueState>>,
+  onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: DownloadProgress): void => callback(progress);
+    ipcRenderer.on(IPC_CHANNELS.downloadProgress, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.downloadProgress, listener);
+  },
+  onDownloadCompleted: (callback: (result: DownloadResult) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, result: DownloadResult): void => callback(result);
+    ipcRenderer.on(IPC_CHANNELS.downloadCompleted, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.downloadCompleted, listener);
+  }
 };
 
 contextBridge.exposeInMainWorld('ccmixterDownloader', api);

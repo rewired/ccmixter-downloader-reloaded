@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   buildReviewedDryRunPlan,
+  createDownloadJobFromReviewedPlan,
   createReviewSessionFromDryRunPlan,
   markGroupAccepted,
   markGroupNeedsReview,
@@ -11,9 +12,14 @@ import {
   renameGroup,
   resetGroupOverrides,
   splitGroup,
+  summarizeDownloadJob,
   toggleFileIncluded,
+  validateDownloadJob,
   type AppError,
   type CcmixterInput,
+  type DownloadJob,
+  type DownloadQueueState,
+  type DownloadResult,
   type DryRunPlan,
   type ResolvedCcmixterMetadata,
   type ReviewGroup,
@@ -25,7 +31,7 @@ import type { AppInfo } from '../../shared/ipc';
 
 type Status = 'idle' | 'loading' | 'error';
 
-const PLACEHOLDER_WARNING = 'Dry run only - no files will be downloaded yet.';
+const DOWNLOAD_WARNING = 'Downloads start only after review and explicit confirmation.';
 
 export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
@@ -35,6 +41,9 @@ export function App(): JSX.Element {
   const [resolvedMetadata, setResolvedMetadata] = useState<ResolvedCcmixterMetadata | null>(null);
   const [dryRunPlan, setDryRunPlan] = useState<DryRunPlan | null>(null);
   const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null);
+  const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
+  const [downloadQueueState, setDownloadQueueState] = useState<DownloadQueueState | null>(null);
+  const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
 
@@ -68,6 +77,38 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    const removeProgressListener = window.ccmixterDownloader.onDownloadProgress((progress) => {
+      setDownloadQueueState((current) =>
+        current && current.jobId === progress.jobId
+          ? {
+              ...current,
+              status: progress.status,
+              progress,
+              files: current.files.map((file) =>
+                file.fileJobId === progress.fileJobId
+                  ? {
+                      ...file,
+                      status: progress.status === 'running' ? 'running' : file.status,
+                      receivedBytes: progress.receivedBytes ?? file.receivedBytes,
+                      totalBytes: progress.totalBytes ?? file.totalBytes
+                    }
+                  : file
+              )
+            }
+          : current
+      );
+    });
+    const removeCompletedListener = window.ccmixterDownloader.onDownloadCompleted((result) => {
+      setDownloadResult(result);
+    });
+
+    return () => {
+      removeProgressListener();
+      removeCompletedListener();
+    };
+  }, []);
+
   async function chooseStemLibraryRoot(): Promise<void> {
     setStatus('loading');
     setError(null);
@@ -79,6 +120,7 @@ export function App(): JSX.Element {
         setDryRunPlan(null);
         setResolvedMetadata(null);
         setReviewSession(null);
+        resetDownloadState();
       }
 
       setStatus('idle');
@@ -97,6 +139,7 @@ export function App(): JSX.Element {
       setParsedInput(parsed);
       setResolvedMetadata(null);
       setReviewSession(null);
+      resetDownloadState();
       setStatus('idle');
     } catch (parseError) {
       setError(toAppError(parseError));
@@ -121,6 +164,7 @@ export function App(): JSX.Element {
       setResolvedMetadata(metadataResult.value);
       setDryRunPlan(null);
       setReviewSession(null);
+      resetDownloadState();
       setStatus('idle');
     } catch (resolveError) {
       setError(toAppError(resolveError));
@@ -145,6 +189,7 @@ export function App(): JSX.Element {
       setResolvedMetadata(null);
       setDryRunPlan(planResult.value);
       setReviewSession(createReviewSessionFromDryRunPlan(planResult.value));
+      resetDownloadState();
       setStatus('idle');
     } catch (planError) {
       setError(toAppError(planError));
@@ -152,9 +197,93 @@ export function App(): JSX.Element {
     }
   }
 
+  async function prepareDownloadJob(reviewedPlan: DryRunPlan): Promise<void> {
+    setStatus('loading');
+    setError(null);
+    setDownloadResult(null);
+
+    try {
+      const jobResult = await window.ccmixterDownloader.createDownloadJob(reviewedPlan);
+
+      if (!jobResult.ok) {
+        setError(jobResult.error);
+        setStatus('error');
+        return;
+      }
+
+      setDownloadJob(jobResult.value);
+      setDownloadQueueState(null);
+      setStatus('idle');
+    } catch (downloadError) {
+      setError(toAppError(downloadError));
+      setStatus('error');
+    }
+  }
+
+  async function confirmDownloadJob(jobId: string): Promise<void> {
+    setStatus('loading');
+    setError(null);
+    if (downloadJob && downloadJob.jobId === jobId) {
+      setDownloadQueueState(toInitialDownloadQueueState(downloadJob));
+    }
+
+    try {
+      const startResult = await window.ccmixterDownloader.startDownloadJob(jobId);
+
+      if (!startResult.ok) {
+        setError(startResult.error);
+        setStatus('error');
+        return;
+      }
+
+      setDownloadQueueState(startResult.value);
+      setStatus('idle');
+    } catch (downloadError) {
+      setError(toAppError(downloadError));
+      setStatus('error');
+    }
+  }
+
+  async function cancelDownloadJob(jobId: string): Promise<void> {
+    setError(null);
+
+    try {
+      const cancelResult = await window.ccmixterDownloader.cancelDownloadJob(jobId);
+
+      if (!cancelResult.ok) {
+        setError(cancelResult.error);
+        setStatus('error');
+        return;
+      }
+
+      setDownloadQueueState(cancelResult.value);
+      setStatus('idle');
+    } catch (downloadError) {
+      setError(toAppError(downloadError));
+      setStatus('error');
+    }
+  }
+
+  function resetDownloadState(): void {
+    setDownloadJob(null);
+    setDownloadQueueState(null);
+    setDownloadResult(null);
+  }
+
   const canCreateDryRun = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
-  const reviewedDryRunPlan =
-    dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, dryRunPlan.stemLibraryRoot) : dryRunPlan;
+  const reviewedDryRunPlan = useMemo(
+    () => (dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, dryRunPlan.stemLibraryRoot) : dryRunPlan),
+    [dryRunPlan, reviewSession]
+  );
+  const advisoryDownloadJob = useMemo(
+    () => (reviewedDryRunPlan ? createDownloadJobFromReviewedPlan(reviewedDryRunPlan, { jobId: 'renderer-advisory-job' }) : null),
+    [reviewedDryRunPlan]
+  );
+  const advisoryDownloadValidation = advisoryDownloadJob ? validateDownloadJob(advisoryDownloadJob) : null;
+  const advisoryDownloadSummary = advisoryDownloadJob ? summarizeDownloadJob(advisoryDownloadJob) : null;
+  const canPrepareDownload =
+    Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
+    status !== 'loading';
 
   return (
     <main className="app-shell">
@@ -168,8 +297,8 @@ export function App(): JSX.Element {
         </header>
 
         <section className="banner" role="status">
-          <strong>{PLACEHOLDER_WARNING}</strong>
-          <span>No ccMixter scan, download, ZIP extraction, or attribution writing happens in this slice.</span>
+          <strong>{DOWNLOAD_WARNING}</strong>
+          <span>No ZIP extraction or attribution writing happens in this slice.</span>
         </section>
 
         <section className="controls" aria-label="Dry run controls">
@@ -266,6 +395,21 @@ export function App(): JSX.Element {
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>
+                {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
+                  <DownloadPanel
+                    advisoryJob={advisoryDownloadJob}
+                    advisorySummary={advisoryDownloadSummary}
+                    advisoryValidationOk={advisoryDownloadValidation.ok}
+                    canPrepareDownload={canPrepareDownload}
+                    downloadJob={downloadJob}
+                    downloadQueueState={downloadQueueState}
+                    downloadResult={downloadResult}
+                    onCancel={(jobId) => void cancelDownloadJob(jobId)}
+                    onConfirm={(jobId) => void confirmDownloadJob(jobId)}
+                    onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
+                    status={status}
+                  />
+                ) : null}
               </>
             ) : resolvedMetadata ? (
               <>
@@ -287,6 +431,139 @@ export function App(): JSX.Element {
         </section>
       </section>
     </main>
+  );
+}
+
+function DownloadPanel({
+  advisoryJob,
+  advisorySummary,
+  advisoryValidationOk,
+  canPrepareDownload,
+  downloadJob,
+  downloadQueueState,
+  downloadResult,
+  onCancel,
+  onConfirm,
+  onPrepare,
+  status
+}: {
+  advisoryJob: DownloadJob;
+  advisorySummary: ReturnType<typeof summarizeDownloadJob>;
+  advisoryValidationOk: boolean;
+  canPrepareDownload: boolean;
+  downloadJob: DownloadJob | null;
+  downloadQueueState: DownloadQueueState | null;
+  downloadResult: DownloadResult | null;
+  onCancel: (jobId: string) => void;
+  onConfirm: (jobId: string) => void;
+  onPrepare: () => void;
+  status: Status;
+}): JSX.Element {
+  const jobForSummary = downloadJob ?? advisoryJob;
+  const summary = downloadJob ? summarizeDownloadJob(downloadJob) : advisorySummary;
+  const canConfirm =
+    downloadJob !== null &&
+    downloadJob.status === 'queued' &&
+    summarizeDownloadJob(downloadJob).writableFiles > 0 &&
+    downloadJob.errors.length === 0 &&
+    status !== 'loading';
+  const isRunning = downloadQueueState?.status === 'running';
+
+  return (
+    <section className="download-panel" aria-label="Download confirmation and progress">
+      <div className="download-heading">
+        <div>
+          <h3>Download</h3>
+          <span>{summary.writableFiles} file(s) ready to write</span>
+        </div>
+        <span className={`source-badge status-${downloadQueueState?.status ?? downloadJob?.status ?? 'queued'}`}>
+          {downloadQueueState?.status ?? downloadJob?.status ?? 'not prepared'}
+        </span>
+      </div>
+
+      <dl className="details compact">
+        <div>
+          <dt>Target root</dt>
+          <dd>{summary.targetRoot}</dd>
+        </div>
+        <div>
+          <dt>Skipped</dt>
+          <dd>{summary.skippedFiles}</dd>
+        </div>
+        <div>
+          <dt>Warnings</dt>
+          <dd>{summary.warnings.length}</dd>
+        </div>
+        <div>
+          <dt>Conflicts</dt>
+          <dd>{advisoryValidationOk ? summary.errors.length : 'blocking'}</dd>
+        </div>
+      </dl>
+
+      <div className="download-actions">
+        <button type="button" onClick={onPrepare} disabled={!canPrepareDownload}>
+          Start Download
+        </button>
+        <button type="button" className="secondary" onClick={() => onConfirm(downloadJob!.jobId)} disabled={!canConfirm}>
+          Confirm Download
+        </button>
+        <button type="button" className="secondary" onClick={() => onCancel(downloadQueueState!.jobId)} disabled={!isRunning}>
+          Cancel
+        </button>
+      </div>
+
+      {downloadJob && !downloadQueueState ? (
+        <p className="confirmation-note">
+          Confirm to write {summary.writableFiles} file(s) under {downloadJob.stemLibraryRootPath}.
+        </p>
+      ) : null}
+
+      <ul className="path-list download-file-list">
+        {(downloadQueueState?.files ?? jobForSummary.files).map((file) => (
+          <li key={file.fileJobId}>
+            <span>{file.targetRelativePath}</span>
+            <small>
+              {file.status}
+              {'receivedBytes' in file && typeof file.receivedBytes === 'number' ? ` / ${formatBytes(file.receivedBytes)}` : ''}
+              {'totalBytes' in file && typeof file.totalBytes === 'number' ? ` of ${formatBytes(file.totalBytes)}` : ''}
+              {'totalBytes' in file && typeof file.totalBytes !== 'number' ? ' / total unknown' : ''}
+            </small>
+          </li>
+        ))}
+      </ul>
+
+      {downloadQueueState ? (
+        <p className="state">
+          {downloadQueueState.progress.completedFiles} of {downloadQueueState.progress.totalFiles} completed;{' '}
+          {downloadQueueState.progress.skippedFiles} skipped; {downloadQueueState.progress.failedFiles} failed.
+        </p>
+      ) : null}
+
+      {downloadResult ? (
+        <p className="state">
+          Result: {downloadResult.status} ({downloadResult.completedFiles} completed, {downloadResult.skippedFiles} skipped,{' '}
+          {downloadResult.failedFiles} failed, {downloadResult.cancelledFiles} cancelled)
+        </p>
+      ) : null}
+
+      {summary.warnings.length > 0 ? (
+        <ul className="warning-list">
+          {summary.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {summary.errors.length > 0 ? (
+        <ul className="warning-list error-list">
+          {summary.errors.map((downloadError) => (
+            <li key={`${downloadError.code}-${downloadError.message}`}>
+              {downloadError.code}: {downloadError.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
@@ -587,5 +864,47 @@ function toAppError(error: unknown): AppError {
     code: 'RENDERER_ERROR',
     message: error instanceof Error ? error.message : 'An unexpected renderer error occurred.',
     recoverable: true
+  };
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {
+  const activeFiles = job.files.filter((file) => file.status !== 'skipped');
+
+  return {
+    jobId: job.jobId,
+    status: 'running',
+    files: job.files.map((file) => ({
+      fileJobId: file.fileJobId,
+      targetRelativePath: file.targetRelativePath,
+      status: file.status,
+      receivedBytes: file.receivedBytes,
+      totalBytes: file.totalBytes,
+      warnings: file.warnings,
+      errors: file.errors
+    })),
+    progress: {
+      jobId: job.jobId,
+      status: 'running',
+      completedFiles: 0,
+      totalFiles: activeFiles.length,
+      skippedFiles: job.files.length - activeFiles.length,
+      failedFiles: 0,
+      warnings: job.warnings,
+      errors: job.errors
+    },
+    warnings: job.warnings,
+    errors: job.errors
   };
 }
