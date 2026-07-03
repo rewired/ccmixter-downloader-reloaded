@@ -43,8 +43,9 @@ const createWindow = (): void => {
   void mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 };
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   settingsStore = new SettingsStore(app.getPath('userData'));
+  await applyE2EStemLibraryRoot();
   registerIpcHandlers();
   createWindow();
 
@@ -68,6 +69,15 @@ function registerIpcHandlers(): void {
   }));
 
   ipcMain.handle(IPC_CHANNELS.chooseStemLibraryRoot, async (): Promise<ChooseStemLibraryRootResult> => {
+    const e2eRootPath = getE2EStemLibraryRootPath();
+    if (e2eRootPath) {
+      const root = await settingsStore.setStemLibraryRoot(e2eRootPath);
+      return {
+        cancelled: false,
+        root
+      };
+    }
+
     const focusedWindow = BrowserWindow.getFocusedWindow() ?? undefined;
     const dialogOptions: OpenDialogOptions = {
       title: 'Choose Stem Library Root Folder',
@@ -189,6 +199,22 @@ function registerIpcHandlers(): void {
       return errorResult('DOWNLOAD_JOB_CANCEL_FAILED', 'Download job could not be cancelled.', true, error);
     }
   });
+}
+
+async function applyE2EStemLibraryRoot(): Promise<void> {
+  const e2eRootPath = getE2EStemLibraryRootPath();
+  if (e2eRootPath) {
+    await settingsStore.setStemLibraryRoot(e2eRootPath);
+  }
+}
+
+function getE2EStemLibraryRootPath(): string | null {
+  const e2eRootPath = process.env.CCMIXTER_E2E_ROOT;
+  if (process.env.CCMIXTER_E2E !== '1' || !e2eRootPath || !isValidFolderPath(e2eRootPath)) {
+    return null;
+  }
+
+  return e2eRootPath;
 }
 
 function isValidFolderPath(folderPath: string): boolean {
