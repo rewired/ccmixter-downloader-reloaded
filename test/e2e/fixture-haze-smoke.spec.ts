@@ -38,6 +38,7 @@ test('fixture:haze-smoke review and download smoke', async () => {
     await expect(page.getByText('Fixture/sample data: fixture:haze-smoke uses recorded ccMixter metadata for UI smoke testing.')).toBeVisible();
     await expect(page.getByText('preview / mp3 / lossy')).toBeVisible();
     await expect(page.getByText('archive / zip / archive')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview archive contents' })).toBeVisible();
     await expect(page.getByText('File has no download URL and will be skipped.')).toBeVisible();
     await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
 

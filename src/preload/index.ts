@@ -9,6 +9,7 @@ import type {
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
   CcmixterInput,
+  ArchivePreview,
   DownloadJob,
   DownloadProgress,
   DownloadQueueState,
@@ -36,6 +37,8 @@ const api: CcmixterDownloaderApi = {
     ipcRenderer.invoke(IPC_CHANNELS.startDownloadJob, jobId) as Promise<IpcResult<DownloadQueueState>>,
   cancelDownloadJob: (jobId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelDownloadJob, jobId) as Promise<IpcResult<DownloadQueueState>>,
+  previewArchiveDownload: (jobId: string, fileJobId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.previewArchiveDownload, jobId, fileJobId) as Promise<IpcResult<ArchivePreview>>,
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: DownloadProgress): void => callback(progress);
     ipcRenderer.on(IPC_CHANNELS.downloadProgress, listener);

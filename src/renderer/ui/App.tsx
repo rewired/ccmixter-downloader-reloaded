@@ -23,6 +23,7 @@ import {
   toggleFileIncluded,
   validateDownloadJob,
   type AppError,
+  type ArchivePreview,
   type CcmixterInput,
   type DownloadJob,
   type DownloadQueueState,
@@ -52,6 +53,8 @@ export function App(): JSX.Element {
   const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
   const [downloadQueueState, setDownloadQueueState] = useState<DownloadQueueState | null>(null);
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
+  const [archivePreviews, setArchivePreviews] = useState<Record<string, ArchivePreview>>({});
+  const [archivePreviewErrors, setArchivePreviewErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
 
@@ -272,10 +275,34 @@ export function App(): JSX.Element {
     }
   }
 
+  async function previewArchiveDownload(jobId: string, fileJobId: string): Promise<void> {
+    setError(null);
+    setArchivePreviewErrors((current) => {
+      const next = { ...current };
+      delete next[fileJobId];
+      return next;
+    });
+
+    try {
+      const result = await window.ccmixterDownloader.previewArchiveDownload(jobId, fileJobId);
+
+      if (!result.ok) {
+        setArchivePreviewErrors((current) => ({ ...current, [fileJobId]: result.error.message }));
+        return;
+      }
+
+      setArchivePreviews((current) => ({ ...current, [fileJobId]: result.value }));
+    } catch (previewError) {
+      setArchivePreviewErrors((current) => ({ ...current, [fileJobId]: toAppError(previewError).message }));
+    }
+  }
+
   function resetDownloadState(): void {
     setDownloadJob(null);
     setDownloadQueueState(null);
     setDownloadResult(null);
+    setArchivePreviews({});
+    setArchivePreviewErrors({});
   }
 
   const canCreateDryRun = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
@@ -424,10 +451,13 @@ export function App(): JSX.Element {
                     downloadJob={downloadJob}
                     downloadQueueState={downloadQueueState}
                     downloadResult={downloadResult}
+                    archivePreviews={archivePreviews}
+                    archivePreviewErrors={archivePreviewErrors}
                     isArtistCatalog={isArtistCatalog}
                     onCancel={(jobId) => void cancelDownloadJob(jobId)}
                     onConfirm={(jobId) => void confirmDownloadJob(jobId)}
                     onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
+                    onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
                     status={status}
                   />
                 ) : null}
@@ -505,10 +535,13 @@ function DownloadPanel({
   downloadJob,
   downloadQueueState,
   downloadResult,
+  archivePreviews,
+  archivePreviewErrors,
   isArtistCatalog,
   onCancel,
   onConfirm,
   onPrepare,
+  onPreviewArchive,
   status
 }: {
   advisoryJob: DownloadJob;
@@ -518,10 +551,13 @@ function DownloadPanel({
   downloadJob: DownloadJob | null;
   downloadQueueState: DownloadQueueState | null;
   downloadResult: DownloadResult | null;
+  archivePreviews: Record<string, ArchivePreview>;
+  archivePreviewErrors: Record<string, string>;
   isArtistCatalog: boolean;
   onCancel: (jobId: string) => void;
   onConfirm: (jobId: string) => void;
   onPrepare: () => void;
+  onPreviewArchive: (jobId: string, fileJobId: string) => void;
   status: Status;
 }): JSX.Element {
   const jobForSummary = downloadJob ?? advisoryJob;
@@ -588,17 +624,39 @@ function DownloadPanel({
       ) : null}
 
       <ul className="path-list download-file-list">
-        {(downloadQueueState?.files ?? jobForSummary.files).map((file) => (
-          <li key={file.fileJobId}>
-            <span>{file.targetRelativePath}</span>
-            <small>
-              {file.status}
-              {'receivedBytes' in file && typeof file.receivedBytes === 'number' ? ` / ${formatBytes(file.receivedBytes)}` : ''}
-              {'totalBytes' in file && typeof file.totalBytes === 'number' ? ` of ${formatBytes(file.totalBytes)}` : ''}
-              {'totalBytes' in file && typeof file.totalBytes !== 'number' ? ' / total unknown' : ''}
-            </small>
-          </li>
-        ))}
+        {jobForSummary.files.map((file) => {
+          const stateFile = downloadQueueState?.files.find((candidate) => candidate.fileJobId === file.fileJobId);
+          const displayFile = stateFile ?? file;
+          const archivePreview = archivePreviews[file.fileJobId];
+          const archivePreviewError = archivePreviewErrors[file.fileJobId];
+
+          return (
+            <li key={file.fileJobId}>
+              <span>{file.targetRelativePath}</span>
+              <small>
+                {displayFile.status}
+                {typeof displayFile.receivedBytes === 'number' ? ` / ${formatBytes(displayFile.receivedBytes)}` : ''}
+                {typeof displayFile.totalBytes === 'number' ? ` of ${formatBytes(displayFile.totalBytes)}` : ''}
+                {typeof displayFile.totalBytes !== 'number' ? ' / total unknown' : ''}
+              </small>
+              {file.fileKind === 'archive' ? (
+                <div className="archive-preview-actions">
+                  <button
+                    type="button"
+                    className="secondary compact-button"
+                    onClick={() => onPreviewArchive(jobForSummary.jobId, file.fileJobId)}
+                    disabled={!downloadJob || status === 'loading'}
+                  >
+                    Preview archive contents
+                  </button>
+                  <span>Archive preview is informational; extraction is not implemented yet.</span>
+                </div>
+              ) : null}
+              {archivePreviewError ? <p className="archive-preview-error">{archivePreviewError}</p> : null}
+              {archivePreview ? <ArchivePreviewDetails preview={archivePreview} /> : null}
+            </li>
+          );
+        })}
       </ul>
 
       {downloadQueueState ? (
@@ -634,6 +692,57 @@ function DownloadPanel({
         </ul>
       ) : null}
     </section>
+  );
+}
+
+function ArchivePreviewDetails({ preview }: { preview: ArchivePreview }): JSX.Element {
+  const blockingWarnings = preview.warnings.filter((warning) => warning.blocking);
+
+  return (
+    <div className="archive-preview" aria-label="Archive extraction preview">
+      <dl className="details compact">
+        <div>
+          <dt>Entries</dt>
+          <dd>{preview.entryCount}</dd>
+        </div>
+        <div>
+          <dt>Safe to extract</dt>
+          <dd>{preview.safeToExtract ? 'yes' : 'no'}</dd>
+        </div>
+      </dl>
+      <ul className="archive-entry-list">
+        {preview.entries.map((entry, index) => (
+          <li className={entry.blocked ? 'blocked-archive-entry' : undefined} key={`${entry.originalPath}-${index}`}>
+            <span>{entry.targetRelativePath ?? entry.originalPath}</span>
+            <small>
+              {entry.type}
+              {typeof entry.sizeBytes === 'number' ? ` / ${formatBytes(entry.sizeBytes)}` : ' / size unknown'}
+              {entry.extension ? ` / ${entry.extension}` : ''}
+            </small>
+          </li>
+        ))}
+      </ul>
+      {blockingWarnings.length > 0 ? (
+        <ul className="warning-list error-list">
+          {blockingWarnings.map((warning) => (
+            <li key={`${warning.code}-${warning.entryPath ?? warning.message}`}>
+              {warning.code}: {warning.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {preview.warnings.some((warning) => !warning.blocking) ? (
+        <ul className="warning-list">
+          {preview.warnings
+            .filter((warning) => !warning.blocking)
+            .map((warning) => (
+              <li key={`${warning.code}-${warning.entryPath ?? warning.message}`}>
+                {warning.code}: {warning.message}
+              </li>
+            ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

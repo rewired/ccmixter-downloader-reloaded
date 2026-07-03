@@ -4,6 +4,7 @@ import path from 'path';
 import {
   parseCcmixterInput,
   type AppError,
+  type ArchivePreview,
   type DownloadJob,
   type DownloadProgress,
   type DownloadQueueState,
@@ -13,12 +14,14 @@ import {
   type StemLibraryRoot
 } from '../shared/domain';
 import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
+import { ArchiveInspectionService } from './services/archive/archiveInspectionService';
 import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
 import { DownloadManager } from './services/download/downloadManager';
 import { SettingsStore } from './settings';
 
 let settingsStore: SettingsStore;
 const ccmixterResolver = new CcmixterResolver();
+const archiveInspectionService = new ArchiveInspectionService();
 const downloadManager = new DownloadManager({
   fetcher: (url, options) => net.fetch(url, options),
   onProgress: (progress) => broadcastToRenderer(IPC_CHANNELS.downloadProgress, progress),
@@ -199,6 +202,36 @@ function registerIpcHandlers(): void {
       return errorResult('DOWNLOAD_JOB_CANCEL_FAILED', 'Download job could not be cancelled.', true, error);
     }
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.previewArchiveDownload,
+    async (_event, jobId: string, fileJobId: string): Promise<IpcResult<ArchivePreview>> => {
+      try {
+        const job = downloadManager.getJob(jobId);
+        if (!job) {
+          return errorResult('ARCHIVE_PREVIEW_JOB_NOT_FOUND', 'Download job was not found for archive preview.', true);
+        }
+
+        const file = job.files.find((candidate) => candidate.fileJobId === fileJobId);
+        if (!file || file.fileKind !== 'archive') {
+          return errorResult('ARCHIVE_PREVIEW_FILE_NOT_FOUND', 'Archive file was not found in the download job.', true);
+        }
+
+        const targetPath = resolveTargetPath(job.stemLibraryRootPath, file.targetRelativePath);
+        return {
+          ok: true,
+          value: await archiveInspectionService.previewZipArchive(targetPath, path.dirname(targetPath))
+        };
+      } catch (error) {
+        return errorResult(
+          'ARCHIVE_PREVIEW_FAILED',
+          'Archive preview could not be created. Download the ZIP first, then preview its contents.',
+          true,
+          error
+        );
+      }
+    }
+  );
 }
 
 async function applyE2EStemLibraryRoot(): Promise<void> {
@@ -219,6 +252,18 @@ function getE2EStemLibraryRootPath(): string | null {
 
 function isValidFolderPath(folderPath: string): boolean {
   return typeof folderPath === 'string' && folderPath.trim().length > 0 && path.isAbsolute(folderPath);
+}
+
+function resolveTargetPath(rootPath: string, targetRelativePath: string): string {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(root, targetRelativePath);
+  const relative = path.relative(root, target);
+
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Archive preview target escapes the Stem Library Root Folder: ${targetRelativePath}`);
+  }
+
+  return target;
 }
 
 function errorResult<T>(code: string, message: string, recoverable: boolean, error?: unknown): IpcResult<T> {

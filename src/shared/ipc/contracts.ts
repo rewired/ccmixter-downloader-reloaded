@@ -1,5 +1,6 @@
 import type {
   AppError,
+  ArchivePreview,
   CcmixterInput,
   DownloadJob,
   DownloadProgress,
@@ -21,6 +22,7 @@ export const IPC_CHANNELS = {
   createDownloadJob: 'download:create-job',
   startDownloadJob: 'download:start-job',
   cancelDownloadJob: 'download:cancel-job',
+  previewArchiveDownload: 'archive:preview-download',
   downloadProgress: 'download:progress',
   downloadCompleted: 'download:completed'
 } as const;
@@ -56,6 +58,7 @@ export interface CcmixterDownloaderApi {
   createDownloadJob(reviewedPlan: DryRunPlan): Promise<IpcResult<DownloadJob>>;
   startDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
   cancelDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
+  previewArchiveDownload(jobId: string, fileJobId: string): Promise<IpcResult<ArchivePreview>>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   onDownloadCompleted(callback: (result: DownloadResult) => void): () => void;
 }

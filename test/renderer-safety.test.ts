@@ -46,6 +46,17 @@ describe('renderer safety', () => {
     expect(source).toContain('Exclude archives');
     expect(source).toContain('Clear all included files');
   });
+
+  it('renders archive preview controls and warning states from shared renderer state', async () => {
+    const source = await readFile(path.resolve('src/renderer/ui/App.tsx'), 'utf8');
+
+    expect(source).toContain('Preview archive contents');
+    expect(source).toContain('Archive preview is informational; extraction is not implemented yet.');
+    expect(source).toContain('ArchivePreviewDetails');
+    expect(source).toContain('Safe to extract');
+    expect(source).toContain('blocking');
+    expect(source).toContain('previewArchiveDownload');
+  });
 });
 
 async function collectRendererSourceFiles(root: string): Promise<string[]> {
