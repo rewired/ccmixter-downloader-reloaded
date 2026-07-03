@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, type OpenDialogOptions } from 'electron';
 import path from 'path';
 
 import {
@@ -20,6 +20,7 @@ import { SettingsStore } from './settings';
 let settingsStore: SettingsStore;
 const ccmixterResolver = new CcmixterResolver();
 const downloadManager = new DownloadManager({
+  fetcher: (url, options) => net.fetch(url, options),
   onProgress: (progress) => broadcastToRenderer(IPC_CHANNELS.downloadProgress, progress),
   onCompleted: (result) => broadcastToRenderer(IPC_CHANNELS.downloadCompleted, result)
 });

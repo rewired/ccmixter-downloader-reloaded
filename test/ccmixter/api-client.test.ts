@@ -7,7 +7,9 @@ import {
   parseCcmixterApiResponse
 } from '../../src/main/services/ccmixter/ccmixterApiClient';
 import artistFixture from '../fixtures/ccmixter/artist-info.json';
+import hazeFixture from '../fixtures/ccmixter/haze-56384-info.json';
 import missingFieldsFixture from '../fixtures/ccmixter/missing-fields.json';
+import soundbitchFixture from '../fixtures/ccmixter/soundbitch-1883-info.json';
 import uploadFixture from '../fixtures/ccmixter/upload-info.json';
 
 describe('CcmixterApiClient URL building', () => {
@@ -77,5 +79,17 @@ describe('CcmixterApiClient mapping', () => {
     expect(result.upload.licenseSummary).toBe('not specified');
     expect(result.warnings).toContain('API upload record did not include a recognized license summary or URL.');
     expect(result.warnings).toContain('No downloadable file candidates were mapped from recognized API fields.');
+  });
+
+  it('maps recorded related upload links without recursively resolving them', () => {
+    const haze = parseCcmixterApiResponse(hazeFixture)[0]!;
+    const soundbitch = parseCcmixterApiResponse(soundbitchFixture)[0]!;
+    const hazeResult = mapRawApiUpload(haze);
+    const soundbitchResult = mapRawApiUpload(soundbitch);
+
+    expect(hazeResult.upload.relatedUploadUrls).toContain('https://ccmixter.org/files/Reiswerk/56402');
+    expect(soundbitchResult.upload.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/2440');
+    expect(hazeResult.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
+    expect(soundbitchResult.warnings).toContain('Related upload links were found in API data but are not recursively resolved in this slice.');
   });
 });

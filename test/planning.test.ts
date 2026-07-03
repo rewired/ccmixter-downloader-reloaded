@@ -39,6 +39,22 @@ describe('parseCcmixterInput', () => {
     });
   });
 
+  it('parses explicit fixture smoke inputs', () => {
+    expect(parseCcmixterInput('fixture:haze-smoke')).toMatchObject({
+      kind: 'fixture',
+      fixtureId: 'haze-smoke'
+    });
+  });
+
+  it('rejects ccMixter lookalike hosts', () => {
+    expect(parseCcmixterInput('https://evilccmixter.org/files/WiseMan/64501')).toMatchObject({
+      kind: 'unknown'
+    });
+    expect(parseCcmixterInput('https://ccmixter.org.evil.example/files/WiseMan/64501')).toMatchObject({
+      kind: 'unknown'
+    });
+  });
+
   it('returns unknown for ambiguous junk', () => {
     expect(parseCcmixterInput('???')).toMatchObject({
       kind: 'unknown'

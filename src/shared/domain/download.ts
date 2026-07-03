@@ -1,7 +1,7 @@
 import type { DryRunPlan, MetadataSourceType, PlannedFile, TrackFileKind } from './models';
 import { sanitizePathSegment } from './planning';
 
-export type DownloadStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+export type DownloadStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'blocked';
 
 export interface DownloadError {
   code: string;
@@ -19,6 +19,7 @@ export interface DownloadProgress {
   completedFiles: number;
   totalFiles: number;
   skippedFiles: number;
+  blockedFiles: number;
   failedFiles: number;
   warnings: string[];
   errors: DownloadError[];
@@ -113,6 +114,7 @@ export function createDownloadJobFromReviewedPlan(plan: DryRunPlan, options: Cre
   const createdAt = options.createdAt ?? new Date().toISOString();
   const jobId = options.jobId ?? `download-${stableId(plan.createdAt)}-${stableId(createdAt)}`;
   const existingTargets = new Set((options.existingTargetRelativePaths ?? []).map(normalizeRelativePathKey));
+  const duplicateTargets = findDuplicateReviewedTargets(plan);
   const files = plan.plannedFiles.map((plannedFile, index) => {
     const pathResult = sanitizeReviewedTargetRelativePath(plannedFile.targetRelativePath);
     const targetRelativePath = pathResult.value ?? `blocked-${index}`;
@@ -132,6 +134,16 @@ export function createDownloadJobFromReviewedPlan(plan: DryRunPlan, options: Cre
       );
     }
 
+    if (duplicateTargets.has(normalizeRelativePathKey(targetRelativePath))) {
+      errors.push(
+        downloadError(
+          'DOWNLOAD_DUPLICATE_TARGET',
+          `Duplicate download target paths are not allowed: ${targetRelativePath}`,
+          true
+        )
+      );
+    }
+
     return {
       fileJobId: `${jobId}::file::${index}`,
       groupId: findGroupIdForPlannedFile(plan, plannedFile, index),
@@ -142,7 +154,7 @@ export function createDownloadJobFromReviewedPlan(plan: DryRunPlan, options: Cre
       originalFilename: plannedFile.sourceFile.originalFilename,
       metadataSource: plannedFile.sourceFile.metadataSource,
       provenance: plannedFile.sourceFile,
-      status: urlResult.value && errors.length === 0 ? 'queued' : 'skipped',
+      status: resolveInitialFileStatus(urlResult.value, errors),
       warnings,
       errors
     } satisfies DownloadFileJob;
@@ -220,11 +232,7 @@ export function validateDownloadJob(job: DownloadJob): DownloadJobValidation {
 export function summarizeDownloadJob(job: DownloadJob): DownloadJobSummary {
   const validation = validateDownloadJob(job);
   const skippedFiles = job.files.filter((file) => file.status === 'skipped').length;
-  const blockedFiles = new Set(
-    validation.blockingErrors
-      .map((error) => targetPathFromError(error.message, job.files))
-      .filter((targetPath): targetPath is string => Boolean(targetPath))
-  ).size;
+  const blockedFiles = job.files.filter((file) => file.status === 'blocked').length;
   const writableFiles = job.files.filter((file) => file.status === 'queued' && file.errors.length === 0).length;
 
   return {
@@ -358,8 +366,38 @@ function normalizeRelativePathKey(relativePath: string): string {
   return relativePath.replace(/\\/g, '/').toLowerCase();
 }
 
+function findDuplicateReviewedTargets(plan: DryRunPlan): Set<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const file of plan.plannedFiles) {
+    const pathResult = sanitizeReviewedTargetRelativePath(file.targetRelativePath);
+    const targetKey = normalizeRelativePathKey(pathResult.value ?? file.targetRelativePath);
+
+    if (seen.has(targetKey)) {
+      duplicates.add(targetKey);
+    } else {
+      seen.add(targetKey);
+    }
+  }
+
+  return duplicates;
+}
+
 function stableId(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'job';
+}
+
+function resolveInitialFileStatus(sourceUrl: string | undefined, errors: DownloadError[]): DownloadStatus {
+  if (sourceUrl && errors.length === 0) {
+    return 'queued';
+  }
+
+  if (errors.length > 0 && errors.every((error) => error.code === 'DOWNLOAD_URL_MISSING')) {
+    return 'skipped';
+  }
+
+  return 'blocked';
 }
 
 function downloadError(code: string, message: string, recoverable: boolean, technicalDetail?: string): DownloadError {
@@ -389,10 +427,6 @@ function uniqueErrors(errors: DownloadError[]): DownloadError[] {
     seen.add(key);
     return true;
   });
-}
-
-function targetPathFromError(message: string, files: DownloadFileJob[]): string | undefined {
-  return files.find((file) => message.includes(file.targetRelativePath))?.targetRelativePath;
 }
 
 function isHttpUrl(value: string | undefined): boolean {

@@ -255,7 +255,7 @@ export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: Stem
     groups,
     plannedFiles,
     warnings,
-    placeholderData: false,
+    placeholderData: session.sourcePlan.placeholderData,
     createdAt: session.sourcePlan.createdAt
   };
 }

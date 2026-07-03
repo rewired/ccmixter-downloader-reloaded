@@ -3,6 +3,7 @@ export type CcmixterInputKind =
   | 'upload-link'
   | 'upload-id'
   | 'artist-name'
+  | 'fixture'
   | 'unknown';
 
 export interface CcmixterInput {
@@ -10,6 +11,7 @@ export interface CcmixterInput {
   kind: CcmixterInputKind;
   normalizedArtistLogin?: string;
   uploadId?: string;
+  fixtureId?: string;
   sourceUrl?: string;
   warnings: string[];
 }

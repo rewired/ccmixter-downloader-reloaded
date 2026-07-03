@@ -31,4 +31,15 @@ describe('parseCcmixterUploadHtml', () => {
     expect(enrichment.warnings).toContain('HTML enrichment did not find visible license summary.');
     expect(enrichment.warnings).toContain('HTML enrichment did not find visible downloadable file candidates.');
   });
+
+  it('extracts recorded Haze upload-page enrichment without live network', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/haze-56384-page.html'), 'utf8');
+    const enrichment = parseCcmixterUploadHtml(html, 'https://ccmixter.org/files/Zutsuri/56384');
+
+    expect(enrichment.bpm).toBe(97);
+    expect(enrichment.tags).toContain('pells');
+    expect(enrichment.licenseSummary).toContain('Attribution');
+    expect(enrichment.fileCandidates.map((candidate) => candidate.file.originalFilename)).toContain('Zutsuri_-_Haze_1.mp3');
+    expect(enrichment.relatedUploadUrls).toContain('https://ccmixter.org/files/Reiswerk/56402');
+  });
 });

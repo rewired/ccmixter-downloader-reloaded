@@ -53,10 +53,10 @@ export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): Ccmix
   const warnings: string[] = [];
   const cleanedHtml = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   const text = decodeHtml(stripTags(cleanedHtml));
-  const bpm = parseBpm(text);
+  const bpm = parseBpm(cleanedHtml, text);
   const tags = parseTags(cleanedHtml);
   const licenseSummary = parseLicenseSummary(cleanedHtml, text);
-  const fileCandidates = parseFileCandidates(cleanedHtml, sourceUrl);
+  const fileCandidates = parseFileCandidates(html, sourceUrl);
   const zipFileHints = parseZipFileHints(text);
   const relatedUploadUrls = parseRelatedUploadUrls(cleanedHtml, sourceUrl);
 
@@ -88,8 +88,9 @@ export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): Ccmix
   };
 }
 
-function parseBpm(text: string): number | undefined {
-  const match = BPM_PATTERN.exec(text);
+function parseBpm(html: string, text: string): number | undefined {
+  const tableMatch = /<th[^>]*>\s*(?:bpm|tempo)\s*<\/th>\s*<td[^>]*>\s*(\d{2,3})\s*<\/td>/i.exec(html);
+  const match = tableMatch ?? BPM_PATTERN.exec(text);
   const value = match?.[1] ?? match?.[2];
 
   if (!value) {
@@ -161,7 +162,43 @@ function parseFileCandidates(html: string, sourceUrl?: string): HtmlFileCandidat
     });
   }
 
+  for (const url of parseScriptAssignedMediaUrls(html)) {
+    const filename = filenameFromHref(url, sourceUrl);
+    if (!filename || !isFileCandidate(filename, url)) {
+      continue;
+    }
+
+    const resolvedUrl = resolveUrl(url, sourceUrl);
+    const key = `${filename}|${resolvedUrl ?? ''}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    candidates.push({
+      label: filename,
+      file: buildTrackFile(filename, resolvedUrl, 'html-enriched', [
+        'File candidate was extracted from upload-page script data and has not been verified by the API.'
+      ])
+    });
+  }
+
   return candidates;
+}
+
+function parseScriptAssignedMediaUrls(html: string): string[] {
+  const urls = new Set<string>();
+  const scriptUrlPattern = /["'](https?:\/\/ccmixter\.org\/[^"']+\.(?:mp3|flac|wav|aif|aiff|ogg|m4a|zip)(?:[?#][^"']*)?)["']/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = scriptUrlPattern.exec(html)) !== null) {
+    if (match[1]) {
+      urls.add(decodeHtml(match[1]));
+    }
+  }
+
+  return [...urls];
 }
 
 function parseZipFileHints(text: string): string[] {

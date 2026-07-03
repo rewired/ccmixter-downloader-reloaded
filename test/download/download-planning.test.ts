@@ -34,6 +34,7 @@ describe('download job planning', () => {
     expect(missingUrlFile?.status).toBe('skipped');
     expect(missingUrlFile?.errors.map((error) => error.code)).toContain('DOWNLOAD_URL_MISSING');
     expect(summarizeDownloadJob(job).skippedFiles).toBe(1);
+    expect(summarizeDownloadJob(job).blockedFiles).toBe(0);
   });
 
   it('allows HTTP ccMixter URLs with an explicit warning', () => {
@@ -83,6 +84,7 @@ describe('download job planning', () => {
     const job = createDownloadJobFromReviewedPlan(plan, { jobId: 'job-a' });
 
     expect(validateDownloadJob(job).blockingErrors.map((error) => error.code)).toContain('DOWNLOAD_DUPLICATE_TARGET');
+    expect(job.files.map((file) => file.status)).toEqual(['blocked', 'blocked', 'queued']);
   });
 
   it('represents existing target files as blocking conflicts', () => {
@@ -93,6 +95,7 @@ describe('download job planning', () => {
     });
 
     expect(validateDownloadJob(job).blockingErrors.map((error) => error.code)).toContain('DOWNLOAD_TARGET_EXISTS');
+    expect(job.files[0]?.status).toBe('blocked');
   });
 
   it('summarizes writable, skipped, and blocked files', () => {
@@ -106,6 +109,7 @@ describe('download job planning', () => {
 
     expect(summary.writableFiles).toBeGreaterThan(0);
     expect(summary.skippedFiles).toBe(1);
+    expect(summary.blockedFiles).toBe(2);
     expect(summary.errors.map((error) => error.code)).toContain('DOWNLOAD_DUPLICATE_TARGET');
   });
 });

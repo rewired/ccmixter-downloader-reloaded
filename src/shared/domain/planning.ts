@@ -47,6 +47,16 @@ export function parseCcmixterInput(raw: string): CcmixterInput {
     };
   }
 
+  const fixtureMatch = /^fixture:([a-z0-9][a-z0-9._-]*)$/i.exec(trimmed);
+  if (fixtureMatch) {
+    return {
+      raw,
+      kind: 'fixture',
+      fixtureId: fixtureMatch[1]!.toLowerCase(),
+      warnings: ['Fixture input is sample data for smoke testing and is not live ccMixter resolution.']
+    };
+  }
+
   if (/^\d+$/.test(trimmed)) {
     return {
       raw,
@@ -191,7 +201,7 @@ function parseUrl(raw: string): CcmixterInput | null {
   }
 
   const host = parsed.hostname.toLowerCase();
-  if (!host.endsWith('ccmixter.org')) {
+  if (!isAllowedCcmixterHostname(host)) {
     return {
       raw,
       kind: 'unknown',
@@ -252,6 +262,10 @@ function findUploadId(pathParts: string[], searchParams: URLSearchParams): strin
 
   const numericPart = pathParts.find((part) => /^\d+$/.test(part));
   return numericPart;
+}
+
+function isAllowedCcmixterHostname(hostname: string): boolean {
+  return hostname === 'ccmixter.org' || hostname.endsWith('.ccmixter.org');
 }
 
 function normalizeArtistLogin(value: string): string {

@@ -8,6 +8,7 @@ export interface DownloadManagerEvents {
 export interface DownloadFetcherOptions {
   signal: AbortSignal;
   redirect: 'manual';
+  headers?: Record<string, string>;
 }
 
 export interface DownloadFetcherResponse {

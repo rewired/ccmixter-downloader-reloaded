@@ -384,8 +384,8 @@ export function App(): JSX.Element {
                   <GroupList groups={dryRunPlan.groups} />
                 )}
                 <ul className="path-list">
-                  {reviewedDryRunPlan?.plannedFiles.map((file) => (
-                    <li key={file.targetRelativePath}>
+                  {reviewedDryRunPlan?.plannedFiles.map((file, index) => (
+                    <li key={`${file.targetRelativePath}-${index}`}>
                       <span>{file.targetRelativePath}</span>
                     </li>
                   ))}
@@ -491,11 +491,15 @@ function DownloadPanel({
           <dd>{summary.skippedFiles}</dd>
         </div>
         <div>
+          <dt>Blocked files</dt>
+          <dd>{summary.blockedFiles}</dd>
+        </div>
+        <div>
           <dt>Warnings</dt>
           <dd>{summary.warnings.length}</dd>
         </div>
         <div>
-          <dt>Conflicts</dt>
+          <dt>Blocking errors</dt>
           <dd>{advisoryValidationOk ? summary.errors.length : 'blocking'}</dd>
         </div>
       </dl>
@@ -535,7 +539,8 @@ function DownloadPanel({
       {downloadQueueState ? (
         <p className="state">
           {downloadQueueState.progress.completedFiles} of {downloadQueueState.progress.totalFiles} completed;{' '}
-          {downloadQueueState.progress.skippedFiles} skipped; {downloadQueueState.progress.failedFiles} failed.
+          {downloadQueueState.progress.skippedFiles} skipped; {downloadQueueState.progress.blockedFiles} blocked;{' '}
+          {downloadQueueState.progress.failedFiles} failed.
         </p>
       ) : null}
 
@@ -881,6 +886,8 @@ function formatBytes(value: number): string {
 
 function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {
   const activeFiles = job.files.filter((file) => file.status !== 'skipped');
+  const blockedFiles = job.files.filter((file) => file.status === 'blocked');
+  const writableFiles = job.files.filter((file) => file.status !== 'skipped' && file.status !== 'blocked');
 
   return {
     jobId: job.jobId,
@@ -898,8 +905,9 @@ function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {
       jobId: job.jobId,
       status: 'running',
       completedFiles: 0,
-      totalFiles: activeFiles.length,
+      totalFiles: writableFiles.length,
       skippedFiles: job.files.length - activeFiles.length,
+      blockedFiles: blockedFiles.length,
       failedFiles: 0,
       warnings: job.warnings,
       errors: job.errors

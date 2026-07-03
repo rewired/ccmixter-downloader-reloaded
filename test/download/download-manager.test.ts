@@ -149,6 +149,23 @@ describe('DownloadManager', () => {
     expect(state.files[0]?.errors[0]?.message).toContain('Redirect target host is not allowed');
   });
 
+  it('sends browser-style headers for ccMixter media requests', async () => {
+    const root = await tempRoot();
+    let headers: Record<string, string> | undefined;
+    const manager = new DownloadManager({
+      fetcher: async (_url, options) => {
+        headers = options.headers;
+        return responseFrom(['bass-data']);
+      }
+    });
+    const job = await manager.createJobFromReviewedPlan(createPlan(root));
+
+    await manager.startDownloadJob(job.jobId);
+
+    expect(headers?.['User-Agent']).toContain('ccMixter Stem Downloader');
+    expect(headers?.Referer).toBe('https://ccmixter.org/');
+  });
+
   it('cancels active work, stops queued downloads, and removes temp files', async () => {
     const root = await tempRoot();
     let manager: DownloadManager;

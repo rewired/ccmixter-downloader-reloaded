@@ -12,6 +12,7 @@ import {
 } from '../../../shared/domain';
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
+import { HAZE_SMOKE_FIXTURE_ID, HAZE_SMOKE_STEM_GROUPS } from '../../sample-data';
 import { CcmixterApiClient } from './ccmixterApiClient';
 import { CcmixterHtmlClient } from './ccmixterHtmlClient';
 import type {
@@ -43,6 +44,11 @@ export class CcmixterResolver {
   ): Promise<ResolvedCcmixterMetadata> {
     const createdAt = new Date().toISOString();
     const input = parseCcmixterInput(rawInput);
+
+    if (input.kind === 'fixture') {
+      return resolveFixtureMetadata(input, createdAt);
+    }
+
     const mappingsResult = await this.resolveApiMappings(input);
 
     if (!mappingsResult.ok) {
@@ -95,7 +101,7 @@ export class CcmixterResolver {
       createdAt: metadata.createdAt,
       input: metadata.input,
       metadataSource: metadata.metadataSource,
-      placeholderData: false,
+      placeholderData: metadata.metadataSource === 'fixture',
       resolverStatus: metadata.status,
       warnings: planWarnings.filter((warning, index, all) => all.indexOf(warning) === index)
     });
@@ -290,6 +296,38 @@ function unresolvedMetadata(input: CcmixterInput, warnings: string[], createdAt:
     warnings: uniqueWarnings,
     status: 'unresolved',
     metadataSource: 'unresolved',
+    createdAt
+  };
+}
+
+function resolveFixtureMetadata(input: CcmixterInput, createdAt: string): ResolvedCcmixterMetadata {
+  if (input.fixtureId !== HAZE_SMOKE_FIXTURE_ID) {
+    return unresolvedMetadata(input, [`Unknown fixture ID: ${input.fixtureId ?? 'not specified'}.`], createdAt);
+  }
+
+  const groups = HAZE_SMOKE_STEM_GROUPS;
+  const uploads = groups.flatMap((group) => group.uploads);
+  const files = groups.flatMap((group) => group.files);
+  const warnings = [
+    ...input.warnings,
+    'Fixture/sample data: fixture:haze-smoke uses recorded ccMixter metadata for UI smoke testing.',
+    'No recursive related-upload resolution happened.',
+    ...groups.flatMap((group) => group.warnings),
+    ...uploads.flatMap((upload) => upload.warnings),
+    ...files.flatMap((file) => file.warnings)
+  ].filter((warning, index, all) => all.indexOf(warning) === index);
+
+  return {
+    input: {
+      ...input,
+      warnings
+    },
+    groups,
+    uploads,
+    files,
+    warnings,
+    status: 'fixture',
+    metadataSource: 'fixture',
     createdAt
   };
 }

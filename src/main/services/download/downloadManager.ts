@@ -268,7 +268,8 @@ export class DownloadManager {
 
       const response = await this.fetcher(currentUrl, {
         signal,
-        redirect: 'manual'
+        redirect: 'manual',
+        headers: createCcmixterDownloadHeaders(currentUrl)
       });
 
       if (response.status >= 300 && response.status < 400) {
@@ -433,9 +434,10 @@ export class DownloadManager {
 
 function toQueueState(job: DownloadJob, activeFileJobId?: string): DownloadQueueState {
   const files = job.files.map(toFileState);
-  const totalFiles = files.filter((file) => file.status !== 'skipped').length;
+  const totalFiles = files.filter((file) => file.status !== 'skipped' && file.status !== 'blocked').length;
   const completedFiles = files.filter((file) => file.status === 'completed').length;
   const skippedFiles = files.filter((file) => file.status === 'skipped').length;
+  const blockedFiles = files.filter((file) => file.status === 'blocked').length;
   const failedFiles = files.filter((file) => file.status === 'failed').length;
   const activeFile = activeFileJobId ? files.find((file) => file.fileJobId === activeFileJobId) : undefined;
   const summary = summarizeDownloadJob(job);
@@ -448,6 +450,7 @@ function toQueueState(job: DownloadJob, activeFileJobId?: string): DownloadQueue
     completedFiles,
     totalFiles,
     skippedFiles,
+    blockedFiles,
     failedFiles,
     warnings: summary.warnings,
     errors: summary.errors
@@ -483,7 +486,7 @@ function toDownloadResult(job: DownloadJob): DownloadResult {
     status: job.status,
     completedFiles: files.filter((file) => file.status === 'completed').length,
     skippedFiles: files.filter((file) => file.status === 'skipped').length,
-    failedFiles: files.filter((file) => file.status === 'failed').length,
+    failedFiles: files.filter((file) => file.status === 'failed' || file.status === 'blocked').length,
     cancelledFiles: files.filter((file) => file.status === 'cancelled').length,
     warnings: summary.warnings,
     errors: summary.errors
@@ -496,6 +499,10 @@ function resolveJobStatus(files: DownloadFileJob[]): DownloadStatus {
   }
 
   if (files.some((file) => file.status === 'failed')) {
+    return 'failed';
+  }
+
+  if (files.some((file) => file.status === 'blocked')) {
     return 'failed';
   }
 
@@ -524,6 +531,15 @@ function parseContentLength(value: string | null): number | undefined {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function createCcmixterDownloadHeaders(sourceUrl: string): Record<string, string> {
+  const url = new URL(sourceUrl);
+
+  return {
+    'User-Agent': 'Mozilla/5.0 (ccMixter Stem Downloader)',
+    Referer: `${url.protocol}//${url.hostname}/`
+  };
 }
 
 function toDownloadError(error: unknown): DownloadError {

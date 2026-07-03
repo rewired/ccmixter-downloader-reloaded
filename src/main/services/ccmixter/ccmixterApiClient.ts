@@ -116,8 +116,11 @@ export function mapRawApiUpload(raw: RawCcmixterApiUpload): CcmixterApiUploadMap
   const licenseSummary = stringFrom(raw, ['license_name', 'license_url', 'upload_license', 'license']);
   const sourceUrl = stringFrom(raw, ['file_page_url', 'upload_url', 'source_url', 'url']);
   const uploadedAt = stringFrom(raw, ['upload_date', 'upload_published', 'created_at', 'date']);
-  const sourceUploadIds = stringArrayFrom(raw, ['sources', 'source_ids', 'source_upload_ids', 'upload_sources']);
-  const remixOfUploadIds = stringArrayFrom(raw, ['remixes', 'remix_of', 'remix_of_upload_ids', 'upload_remixes']);
+  const sourceUploadIds = stringArrayFrom(raw, ['sources', 'source_ids', 'source_upload_ids', 'upload_sources', 'remix_parents']);
+  const remixOfUploadIds = stringArrayFrom(raw, ['remixes', 'remix_of', 'remix_of_upload_ids', 'upload_remixes', 'remix_parents']);
+  const relatedUploadUrls = stringArrayFrom(raw, ['related_upload_urls']).concat(
+    uploadUrlsFrom(raw, ['remix_children', 'remix_parents'])
+  );
 
   if (!uploadId) {
     warnings.push('API upload record did not include a recognized upload ID field.');
@@ -156,6 +159,10 @@ export function mapRawApiUpload(raw: RawCcmixterApiUpload): CcmixterApiUploadMap
     warnings.push('Source URL was constructed from available upload fields and has not been verified by the API.');
   }
 
+  if (relatedUploadUrls.length > 0) {
+    warnings.push('Related upload links were found in API data but are not recursively resolved in this slice.');
+  }
+
   const files = mapRawFiles(raw, warnings);
 
   return {
@@ -170,6 +177,7 @@ export function mapRawApiUpload(raw: RawCcmixterApiUpload): CcmixterApiUploadMap
       sourceUrl: effectiveSourceUrl,
       metadataSource: 'api',
       uploadedAt,
+      relatedUploadUrls,
       sourceUploadIds,
       remixOfUploadIds,
       warnings
@@ -211,7 +219,7 @@ function mapFileRecord(record: unknown): TrackFile | null {
   }
 
   const warnings = downloadUrl ? [] : ['File candidate did not include a recognized download URL field.'];
-  const sizeBytes = numberFrom(record, ['file_size', 'size', 'size_bytes']);
+  const sizeBytes = numberFrom(record, ['file_size', 'size', 'size_bytes', 'file_rawsize']);
   const file = buildTrackFile(filename, downloadUrl, 'api', warnings);
 
   return {
@@ -366,6 +374,28 @@ function stringArrayFrom(record: RawCcmixterApiUpload, keys: string[]): string[]
   }
 
   return [];
+}
+
+function uploadUrlsFrom(record: RawCcmixterApiUpload, keys: string[]): string[] {
+  const urls: string[] = [];
+
+  for (const key of keys) {
+    const value = record[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    for (const item of value) {
+      if (isRecord(item)) {
+        const url = stringFrom(item, ['file_page_url', 'upload_url', 'source_url', 'url']);
+        if (url) {
+          urls.push(url);
+        }
+      }
+    }
+  }
+
+  return urls.filter((url, index, all) => all.indexOf(url) === index);
 }
 
 function arrayFrom(record: RawCcmixterApiUpload, keys: string[]): unknown[] {
