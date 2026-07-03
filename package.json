@@ -1,0 +1,35 @@
+{
+  "name": "ccmixter-stem-downloader",
+  "version": "0.1.0",
+  "description": "Electron foundation for planning ccMixter stem library downloads.",
+  "main": ".webpack/main",
+  "private": true,
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "vitest run test/renderer-safety.test.ts"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/plugin-webpack": "^7.11.2",
+    "@electron-forge/shared-types": "^7.11.2",
+    "@types/node": "22.20.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "css-loader": "^7.1.4",
+    "electron": "^33.4.11",
+    "fork-ts-checker-webpack-plugin": "^9.1.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9",
+    "webpack": "^5.108.3",
+    "webpack-cli": "^5.1.4"
+  }
+}
