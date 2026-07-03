@@ -1,5 +1,11 @@
 nodeLinker: hoisted
 
+minimumReleaseAge: 60
+
 onlyBuiltDependencies:
   - electron
   - esbuild
+
+allowBuilds:
+  electron: true
+  esbuild: true
