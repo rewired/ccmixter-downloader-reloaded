@@ -9,8 +9,8 @@
     "package": "electron-forge package",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
+    "test:e2e": "pnpm package && playwright test",
+    "test:e2e:headed": "pnpm package && playwright test --headed",
     "lint": "vitest run test/renderer-safety.test.ts"
   },
   "dependencies": {

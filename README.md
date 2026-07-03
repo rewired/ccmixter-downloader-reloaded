@@ -35,7 +35,10 @@ pnpm typecheck
 pnpm test
 pnpm lint
 pnpm package
+pnpm test:e2e
 ```
+
+The current Playwright Electron smoke uses one live ccMixter-hosted MP3 URL from `fixture:haze-smoke`, so network availability can affect `pnpm test:e2e`.
 
 ## Current Slice Behavior
 
