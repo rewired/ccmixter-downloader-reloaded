@@ -7,6 +7,7 @@ import {
 import type {
   CcmixterApiClientOptions,
   CcmixterApiQuery,
+  CcmixterArtistCatalogPage,
   CcmixterArtistCatalogResult,
   CcmixterApiUploadMapping,
   RawCcmixterApiUpload
@@ -34,22 +35,17 @@ export class CcmixterApiClient {
 
     for (let pageIndex = 0; pageIndex < ARTIST_CATALOG_MAX_PAGES; pageIndex += 1) {
       const offset = pageIndex * ARTIST_CATALOG_QUERY_LIMIT;
-      const url = buildCcmixterQueryUrl(
-        { artistLogin, dataview: 'default', limit: ARTIST_CATALOG_QUERY_LIMIT, offset },
-        this.baseUrl
-      );
-      const response = await this.fetchJson(url, 'ccMixter API artist catalog request');
-      const pageMappings = parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
+      const page = await this.resolveByArtistLoginPage(artistLogin, offset);
 
-      for (const mapping of pageMappings) {
+      for (const mapping of page.mappings) {
         mappingsByUploadId.set(mapping.upload.uploadId, mapping);
       }
 
-      if (pageMappings.length === 0 || pageMappings.length < ARTIST_CATALOG_QUERY_LIMIT) {
+      if (page.mappings.length < ARTIST_CATALOG_QUERY_LIMIT) {
         return {
           mappings: [...mappingsByUploadId.values()],
           pagingIncomplete: false,
-          warnings: []
+          warnings: page.mappings.length === 0 ? page.warnings : []
         };
       }
     }
@@ -60,6 +56,20 @@ export class CcmixterApiClient {
       mappings: [...mappingsByUploadId.values()],
       pagingIncomplete,
       warnings: pagingIncomplete ? ['Artist catalog API paging reached the maximum page guard.'] : []
+    };
+  }
+
+  async resolveByArtistLoginPage(artistLogin: string, offset: number): Promise<CcmixterArtistCatalogPage> {
+    const url = buildCcmixterQueryUrl(
+      { artistLogin, dataview: 'default', limit: ARTIST_CATALOG_QUERY_LIMIT, offset },
+      this.baseUrl
+    );
+    const response = await this.fetchJson(url, 'ccMixter API artist catalog request');
+    const pageMappings = parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
+
+    return {
+      mappings: pageMappings,
+      warnings: pageMappings.length === 0 ? ['API returned zero results for this page.'] : []
     };
   }
 

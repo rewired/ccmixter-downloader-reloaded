@@ -8,8 +8,10 @@ import type {
 } from '../shared/ipc';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
-  CcmixterInput,
   ArchivePreview,
+  ArtistCatalogPageResult,
+  ArtistCatalogState,
+  CcmixterInput,
   DownloadJob,
   DownloadProgress,
   DownloadQueueState,
@@ -39,6 +41,10 @@ const api: CcmixterDownloaderApi = {
     ipcRenderer.invoke(IPC_CHANNELS.cancelDownloadJob, jobId) as Promise<IpcResult<DownloadQueueState>>,
   previewArchiveDownload: (jobId: string, fileJobId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.previewArchiveDownload, jobId, fileJobId) as Promise<IpcResult<ArchivePreview>>,
+  artistCatalogStart: (artistLogin: string, sourceUrl?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.artistCatalogStart, artistLogin, sourceUrl) as Promise<IpcResult<ArtistCatalogState>>,
+  artistCatalogLoadMore: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.artistCatalogLoadMore, sessionId) as Promise<IpcResult<ArtistCatalogPageResult>>,
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: DownloadProgress): void => callback(progress);
     ipcRenderer.on(IPC_CHANNELS.downloadProgress, listener);

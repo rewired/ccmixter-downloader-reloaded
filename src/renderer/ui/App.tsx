@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  ARTIST_SCAN_REALITY_CHECK_WARNING,
   buildReviewedDryRunPlan,
   clearIncludedDownloadCandidates,
   createDownloadJobFromReviewedPlan,
+  createDryRunPlanFromGroups,
   createReviewSessionFromDryRunPlan,
   excludeArchiveDownloadCandidates,
   excludePreviewDownloadCandidates,
   getDownloadCandidateClassification,
   includeRecommendedDownloadCandidates,
+  isArtistCatalogInput,
   markGroupAccepted,
   markGroupNeedsReview,
   mergeGroups,
@@ -17,13 +20,12 @@ import {
   renameGroup,
   resetGroupOverrides,
   splitGroup,
-  ARTIST_SCAN_REALITY_CHECK_WARNING,
-  isArtistCatalogInput,
   summarizeDownloadJob,
   toggleFileIncluded,
   validateDownloadJob,
   type AppError,
   type ArchivePreview,
+  type ArtistCatalogState,
   type CcmixterInput,
   type DownloadJob,
   type DownloadQueueState,
@@ -55,6 +57,8 @@ export function App(): JSX.Element {
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
   const [archivePreviews, setArchivePreviews] = useState<Record<string, ArchivePreview>>({});
   const [archivePreviewErrors, setArchivePreviewErrors] = useState<Record<string, string>>({});
+  const [catalogSessionState, setCatalogSessionState] = useState<ArtistCatalogState | null>(null);
+  const [catalogIsLoadingMore, setCatalogIsLoadingMore] = useState(false);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
 
@@ -87,6 +91,93 @@ export function App(): JSX.Element {
       isMounted = false;
     };
   }, []);
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingMoreRef = useRef(false);
+
+  const handleLoadMoreCatalog = useCallback(async (): Promise<void> => {
+    if (!catalogSessionState || !catalogSessionState.hasMore) {
+      return;
+    }
+
+    isLoadingMoreRef.current = true;
+    setCatalogIsLoadingMore(true);
+
+    try {
+      const result = await window.ccmixterDownloader.artistCatalogLoadMore(catalogSessionState.sessionId);
+
+      if (!result.ok) {
+        setError(result.error);
+        isLoadingMoreRef.current = false;
+        setCatalogIsLoadingMore(false);
+        return;
+      }
+
+      const page = result.value;
+
+      setCatalogSessionState((prev) =>
+        prev
+          ? {
+              ...prev,
+              loadedCount: page.loadedCount,
+              hasMore: page.hasMore,
+              totalCount: page.totalCount ?? prev.totalCount,
+              groups: page.groups
+            }
+          : null
+      );
+
+      isLoadingMoreRef.current = false;
+      setCatalogIsLoadingMore(false);
+
+      if (reviewSession && stemLibraryRoot) {
+        const root = stemLibraryRoot;
+        const plan = createDryRunPlanFromGroups(rawInput, root, page.groups, {
+          metadataSource: 'api',
+          placeholderData: false,
+          resolverStatus: page.hasMore ? 'partial' : 'resolved',
+          warnings: page.warnings
+        });
+
+        const newSession = createReviewSessionFromDryRunPlan(plan);
+
+        const mergedGroups = newSession.groups.map((newGroup) => {
+          const existingGroup = reviewSession.groups.find(
+            (g) => g.originalGroupId === newGroup.originalGroupId
+          );
+          return existingGroup ?? newGroup;
+        });
+
+        setReviewSession({
+          ...newSession,
+          groups: mergedGroups
+        });
+      }
+    } catch (err) {
+      setError(toAppError(err));
+      isLoadingMoreRef.current = false;
+      setCatalogIsLoadingMore(false);
+    }
+  }, [catalogSessionState, reviewSession, stemLibraryRoot, rawInput]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !catalogSessionState?.hasMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && catalogSessionState?.hasMore && !isLoadingMoreRef.current) {
+          void handleLoadMoreCatalog();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [catalogSessionState?.hasMore, handleLoadMoreCatalog]);
 
   useEffect(() => {
     const removeProgressListener = window.ccmixterDownloader.onDownloadProgress((progress) => {
@@ -179,6 +270,57 @@ export function App(): JSX.Element {
       setStatus('idle');
     } catch (resolveError) {
       setError(toAppError(resolveError));
+      setStatus('error');
+    }
+  }
+
+  async function startArtistCatalog(): Promise<void> {
+    setStatus('loading');
+    setError(null);
+    setCatalogSessionState(null);
+
+    try {
+      if (!parsedInput?.artistLogin) {
+        setError({ code: 'NO_ARTIST_LOGIN', message: 'Artist login could not be determined.', recoverable: true });
+        setStatus('error');
+        return;
+      }
+
+      if (!stemLibraryRoot) {
+        setError({ code: 'STEM_LIBRARY_ROOT_REQUIRED', message: 'Choose a Stem Library Root Folder before reviewing uploads.', recoverable: true });
+        setStatus('error');
+        return;
+      }
+
+      const result = await window.ccmixterDownloader.artistCatalogStart(
+        parsedInput.artistLogin,
+        parsedInput.sourceUrl
+      );
+
+      if (!result.ok) {
+        setError(result.error);
+        setStatus('error');
+        return;
+      }
+
+      const state = result.value;
+      setCatalogSessionState(state);
+
+      const plan = createDryRunPlanFromGroups(rawInput, stemLibraryRoot, state.groups, {
+        metadataSource: 'api',
+        placeholderData: false,
+        resolverStatus: state.hasMore ? 'partial' : 'resolved',
+        warnings: state.warnings
+      });
+
+      setParsedInput(plan.input);
+      setResolvedMetadata(null);
+      setDryRunPlan(plan);
+      setReviewSession(createReviewSessionFromDryRunPlan(plan));
+      resetDownloadState();
+      setStatus('idle');
+    } catch (err) {
+      setError(toAppError(err));
       setStatus('error');
     }
   }
@@ -318,7 +460,7 @@ export function App(): JSX.Element {
   const advisoryDownloadSummary = advisoryDownloadJob ? summarizeDownloadJob(advisoryDownloadJob) : null;
   const activeInput = dryRunPlan?.input ?? resolvedMetadata?.input ?? parsedInput;
   const isArtistCatalog = activeInput ? isArtistCatalogInput(activeInput) : false;
-  const catalogCounts = isArtistCatalog ? resolveArtistCatalogCounts(resolvedMetadata, dryRunPlan, reviewedDryRunPlan) : null;
+  const catalogCounts = isArtistCatalog ? resolveArtistCatalogCounts(catalogSessionState, resolvedMetadata, dryRunPlan, reviewedDryRunPlan) : null;
   const canPrepareDownload =
     Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
     status !== 'loading';
@@ -343,7 +485,7 @@ export function App(): JSX.Element {
           <section className="banner artist-scan-banner" role="status">
             <strong>Review artist uploads</strong>
             <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
-            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
+            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
           </section>
         ) : null}
 
@@ -374,7 +516,11 @@ export function App(): JSX.Element {
             <button type="button" className="secondary" onClick={() => void resolveMetadata()} disabled={status === 'loading'}>
               Resolve metadata
             </button>
-            <button type="button" onClick={() => void createDryRunPlan()} disabled={!canCreateDryRun}>
+            <button
+              type="button"
+              onClick={() => void (isArtistCatalog ? startArtistCatalog() : createDryRunPlan())}
+              disabled={!canCreateDryRun}
+            >
               {isArtistCatalog ? 'Review artist uploads' : 'Create dry run'}
             </button>
           </div>
@@ -424,12 +570,13 @@ export function App(): JSX.Element {
             {dryRunPlan ? (
               <>
                 <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
                 {reviewSession ? (
                   <ReviewGroupList reviewSession={reviewSession} onChange={setReviewSession} />
                 ) : (
                   <GroupList groups={dryRunPlan.groups} />
                 )}
+                {isArtistCatalog ? <div ref={sentinelRef} id="catalog-scroll-sentinel" /> : null}
                 <ul className="path-list">
                   {reviewedDryRunPlan?.plannedFiles.map((file, index) => (
                     <li key={`${file.targetRelativePath}-${index}`}>
@@ -465,7 +612,7 @@ export function App(): JSX.Element {
             ) : resolvedMetadata ? (
               <>
                 <GroupList groups={resolvedMetadata.groups} />
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} /> : null}
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
                 {resolvedMetadata.warnings.length > 0 ? (
                   <ul className="warning-list">
                     {resolvedMetadata.warnings.map((warning) => (
@@ -487,33 +634,68 @@ export function App(): JSX.Element {
 }
 
 interface ArtistCatalogCounts {
-  uploadCount: number;
+  loadedCount: number;
+  totalCount?: number;
   plannedFileCount: number;
   includedFileCount: number;
 }
 
 function resolveArtistCatalogCounts(
+  catalogSessionState: ArtistCatalogState | null,
   resolvedMetadata: ResolvedCcmixterMetadata | null,
   dryRunPlan: DryRunPlan | null,
   reviewedDryRunPlan: DryRunPlan | null
-): ArtistCatalogCounts {
-  const uploadIds = new Set(
-    (dryRunPlan?.groups.flatMap((group) => group.uploads) ?? resolvedMetadata?.uploads ?? []).map((upload) => upload.uploadId)
-  );
+): ArtistCatalogCounts | null {
+  if (catalogSessionState) {
+    return {
+      loadedCount: catalogSessionState.loadedCount,
+      totalCount: catalogSessionState.totalCount,
+      plannedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
+      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
+    };
+  }
 
-  return {
-    uploadCount: uploadIds.size,
-    plannedFileCount: dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
-    includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
-  };
+  if (dryRunPlan || resolvedMetadata) {
+    const uploadIds = new Set(
+      (dryRunPlan?.groups.flatMap((group) => group.uploads) ?? resolvedMetadata?.uploads ?? []).map((upload) => upload.uploadId)
+    );
+
+    return {
+      loadedCount: uploadIds.size,
+      totalCount: undefined,
+      plannedFileCount: dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
+      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
+    };
+  }
+
+  return null;
 }
 
-function ArtistCatalogCounts({ counts }: { counts: ArtistCatalogCounts }): JSX.Element {
+function ArtistCatalogCounts({
+  counts,
+  catalogIsLoadingMore,
+  hasMore
+}: {
+  counts: ArtistCatalogCounts;
+  catalogIsLoadingMore: boolean;
+  hasMore: boolean;
+}): JSX.Element {
   return (
     <dl className="details compact artist-catalog-counts" aria-label="Artist catalog scan counts">
       <div>
-        <dt>Uploads</dt>
-        <dd>{counts.uploadCount}</dd>
+        <dt>Loaded uploads</dt>
+        <dd>
+          {counts.loadedCount}
+          {typeof counts.totalCount === 'number' ? ` of ${counts.totalCount}` : ''}
+        </dd>
+      </div>
+      <div>
+        <dt>Total uploads</dt>
+        <dd>{typeof counts.totalCount === 'number' ? counts.totalCount : 'unknown'}</dd>
+      </div>
+      <div>
+        <dt>Has more</dt>
+        <dd>{hasMore ? 'true' : 'false'}</dd>
       </div>
       <div>
         <dt>Planned files</dt>
@@ -523,6 +705,8 @@ function ArtistCatalogCounts({ counts }: { counts: ArtistCatalogCounts }): JSX.E
         <dt>Included files</dt>
         <dd>{counts.includedFileCount}</dd>
       </div>
+      {catalogIsLoadingMore ? <div><dt>Status</dt><dd>Loading more uploads…</dd></div> : null}
+      {!hasMore && counts.loadedCount > 0 ? <div><dt>Status</dt><dd>All {typeof counts.totalCount === 'number' ? counts.totalCount : counts.loadedCount} uploads loaded</dd></div> : null}
     </dl>
   );
 }

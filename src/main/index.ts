@@ -5,6 +5,8 @@ import {
   parseCcmixterInput,
   type AppError,
   type ArchivePreview,
+  type ArtistCatalogPageResult,
+  type ArtistCatalogState,
   type DownloadJob,
   type DownloadProgress,
   type DownloadQueueState,
@@ -15,6 +17,7 @@ import {
 } from '../shared/domain';
 import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
 import { ArchiveInspectionService } from './services/archive/archiveInspectionService';
+import { ArtistCatalogSessionManager } from './services/ccmixter/artistCatalogSessionManager';
 import { CcmixterApiClient } from './services/ccmixter/ccmixterApiClient';
 import { CcmixterHtmlClient } from './services/ccmixter/ccmixterHtmlClient';
 import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
@@ -26,9 +29,15 @@ const electronFetch: typeof fetch = (input, init) => {
   const resolvedInput = input instanceof URL ? input.toString() : input;
   return net.fetch(resolvedInput as Parameters<typeof net.fetch>[0], init) as Promise<Response>;
 };
+const apiClient = new CcmixterApiClient({ fetchImpl: electronFetch });
+const htmlClient = new CcmixterHtmlClient({ fetchImpl: electronFetch });
 const ccmixterResolver = new CcmixterResolver({
-  apiClient: new CcmixterApiClient({ fetchImpl: electronFetch }),
-  htmlClient: new CcmixterHtmlClient({ fetchImpl: electronFetch })
+  apiClient,
+  htmlClient
+});
+const catalogSessionManager = new ArtistCatalogSessionManager({
+  apiClient,
+  htmlClient
 });
 const archiveInspectionService = new ArchiveInspectionService();
 const downloadManager = new DownloadManager({
@@ -211,6 +220,36 @@ function registerIpcHandlers(): void {
       return errorResult('DOWNLOAD_JOB_CANCEL_FAILED', 'Download job could not be cancelled.', true, error);
     }
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.artistCatalogStart,
+    async (_event, artistLogin: string, sourceUrl?: string): Promise<IpcResult<ArtistCatalogState>> => {
+      try {
+        const result = await catalogSessionManager.startSession(artistLogin, sourceUrl);
+        if (!result.ok) {
+          return errorResult('ARTIST_CATALOG_START_FAILED', result.error, true);
+        }
+        return { ok: true, value: result.value };
+      } catch (error) {
+        return errorResult('ARTIST_CATALOG_START_FAILED', 'Artist catalog session could not be started.', true, error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.artistCatalogLoadMore,
+    async (_event, sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>> => {
+      try {
+        const result = await catalogSessionManager.loadMore(sessionId);
+        if (!result.ok) {
+          return errorResult('ARTIST_CATALOG_LOAD_MORE_FAILED', result.error, true);
+        }
+        return { ok: true, value: result.value };
+      } catch (error) {
+        return errorResult('ARTIST_CATALOG_LOAD_MORE_FAILED', 'Artist catalog could not load more uploads.', true, error);
+      }
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.previewArchiveDownload,

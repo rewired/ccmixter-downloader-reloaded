@@ -36,9 +36,13 @@ describe('renderer safety', () => {
 
     expect(source).toContain('ARTIST_SCAN_REALITY_CHECK_WARNING');
     expect(source).toContain('Review artist uploads');
-    expect(source).toContain('Uploads');
+    expect(source).toContain('Loaded uploads');
+    expect(source).toContain('Total uploads');
+    expect(source).toContain('Has more');
     expect(source).toContain('Planned files');
     expect(source).toContain('Included files');
+    expect(source).toContain('Loading more uploads');
+    expect(source).toContain('uploads loaded');
     expect(source).toContain('resolveArtistCatalogCounts');
     expect(source).toContain('isArtistCatalogInput');
     expect(source).toContain('Include recommended source/stem/archive files');

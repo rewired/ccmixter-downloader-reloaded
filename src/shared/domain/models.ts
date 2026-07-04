@@ -191,3 +191,26 @@ export interface AppError {
   technicalDetail?: string;
   recoverable: boolean;
 }
+
+export interface ArtistCatalogState {
+  sessionId: string;
+  artistLogin: string;
+  sourceUrl: string;
+  loadedUploadIds: string[];
+  groups: StemGroup[];
+  loadedCount: number;
+  totalCount?: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  pagingIncomplete: boolean;
+  warnings: string[];
+}
+
+export interface ArtistCatalogPageResult {
+  sessionId: string;
+  groups: StemGroup[];
+  loadedCount: number;
+  totalCount?: number;
+  hasMore: boolean;
+  warnings: string[];
+}

@@ -1,6 +1,8 @@
 import type {
   AppError,
   ArchivePreview,
+  ArtistCatalogPageResult,
+  ArtistCatalogState,
   CcmixterInput,
   DownloadJob,
   DownloadProgress,
@@ -24,7 +26,9 @@ export const IPC_CHANNELS = {
   cancelDownloadJob: 'download:cancel-job',
   previewArchiveDownload: 'archive:preview-download',
   downloadProgress: 'download:progress',
-  downloadCompleted: 'download:completed'
+  downloadCompleted: 'download:completed',
+  artistCatalogStart: 'ccmixter:artist-catalog-start',
+  artistCatalogLoadMore: 'ccmixter:artist-catalog-load-more'
 } as const;
 
 export interface AppInfo {
@@ -59,6 +63,8 @@ export interface CcmixterDownloaderApi {
   startDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
   cancelDownloadJob(jobId: string): Promise<IpcResult<DownloadQueueState>>;
   previewArchiveDownload(jobId: string, fileJobId: string): Promise<IpcResult<ArchivePreview>>;
+  artistCatalogStart(artistLogin: string, sourceUrl?: string): Promise<IpcResult<ArtistCatalogState>>;
+  artistCatalogLoadMore(sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   onDownloadCompleted(callback: (result: DownloadResult) => void): () => void;
 }

@@ -107,6 +107,7 @@ export function parseCcmixterArtistCatalogHtml(
   }
 
   const nextPageUrls = parseCatalogPageUrls(html, sourceUrl);
+  const totalCount = parseCatalogTotalCount(html);
   const mappings = [...uploadsById.values()];
   const warnings =
     mappings.length === 0
@@ -116,6 +117,7 @@ export function parseCcmixterArtistCatalogHtml(
   return {
     mappings,
     nextPageUrls,
+    totalCount,
     warnings
   };
 }
@@ -263,6 +265,26 @@ function parseCatalogDate(block: string): string | undefined {
   const raw = decodeHtml(stripTags(dateMatch?.[1] ?? '')).replace(/\bRecommends\s*\(\d+\)/i, '').trim();
 
   return raw.length > 0 ? raw.replace(/\s+/g, ' ') : undefined;
+}
+
+function parseCatalogTotalCount(html: string): number | undefined {
+  const pattern = /[Vv]iewing\s+\d+\s+through\s+\d+\s+of\s+(\d+)/;
+  const match = pattern.exec(html);
+  if (match?.[1]) {
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  const text = decodeHtml(stripTags(html));
+  const textMatch = /[Vv]iewing\s+\d+\s+through\s+\d+\s+of\s+(\d+)/.exec(text);
+  if (textMatch?.[1]) {
+    const parsed = Number.parseInt(textMatch[1], 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
 }
 
 function parseCatalogPageUrls(html: string, sourceUrl: string): string[] {

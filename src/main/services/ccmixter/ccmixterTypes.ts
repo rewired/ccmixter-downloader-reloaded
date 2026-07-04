@@ -28,6 +28,12 @@ export interface CcmixterArtistCatalogResult {
   warnings: string[];
 }
 
+export interface CcmixterArtistCatalogPage {
+  mappings: CcmixterApiUploadMapping[];
+  totalCount?: number;
+  warnings: string[];
+}
+
 export interface HtmlFileCandidate {
   file: TrackFile;
   label: string;
@@ -47,6 +53,7 @@ export interface CcmixterHtmlEnrichment {
 export interface CcmixterHtmlCatalogResult {
   mappings: CcmixterApiUploadMapping[];
   nextPageUrls: string[];
+  totalCount?: number;
   warnings: string[];
 }
 
