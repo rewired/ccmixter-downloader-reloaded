@@ -7,6 +7,7 @@ import {
 import type {
   CcmixterApiClientOptions,
   CcmixterApiQuery,
+  CcmixterArtistCatalogResult,
   CcmixterApiUploadMapping,
   RawCcmixterApiUpload
 } from './ccmixterTypes';
@@ -14,6 +15,7 @@ import type {
 const DEFAULT_QUERY_API_URL = 'https://ccmixter.org/api/query';
 const DEFAULT_TIMEOUT_MS = 10_000;
 export const ARTIST_CATALOG_QUERY_LIMIT = 100;
+export const ARTIST_CATALOG_MAX_PAGES = 20;
 
 export class CcmixterApiClient {
   private readonly baseUrl: string;
@@ -26,10 +28,39 @@ export class CcmixterApiClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async resolveByArtistLogin(artistLogin: string): Promise<CcmixterApiUploadMapping[]> {
-    const url = buildCcmixterQueryUrl({ artistLogin, dataview: 'info', limit: ARTIST_CATALOG_QUERY_LIMIT }, this.baseUrl);
-    const response = await this.fetchJson(url);
-    return parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
+  async resolveByArtistLogin(artistLogin: string): Promise<CcmixterArtistCatalogResult> {
+    const mappingsByUploadId = new Map<string, CcmixterApiUploadMapping>();
+    let pagingIncomplete = false;
+
+    for (let pageIndex = 0; pageIndex < ARTIST_CATALOG_MAX_PAGES; pageIndex += 1) {
+      const offset = pageIndex * ARTIST_CATALOG_QUERY_LIMIT;
+      const url = buildCcmixterQueryUrl(
+        { artistLogin, dataview: 'default', limit: ARTIST_CATALOG_QUERY_LIMIT, offset },
+        this.baseUrl
+      );
+      const response = await this.fetchJson(url);
+      const pageMappings = parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
+
+      for (const mapping of pageMappings) {
+        mappingsByUploadId.set(mapping.upload.uploadId, mapping);
+      }
+
+      if (pageMappings.length === 0 || pageMappings.length < ARTIST_CATALOG_QUERY_LIMIT) {
+        return {
+          mappings: [...mappingsByUploadId.values()],
+          pagingIncomplete: false,
+          warnings: []
+        };
+      }
+    }
+
+    pagingIncomplete = true;
+
+    return {
+      mappings: [...mappingsByUploadId.values()],
+      pagingIncomplete,
+      warnings: pagingIncomplete ? ['Artist catalog API paging reached the maximum page guard.'] : []
+    };
   }
 
   async resolveByUploadId(uploadId: string): Promise<CcmixterApiUploadMapping[]> {
@@ -82,6 +113,10 @@ export function buildCcmixterQueryUrl(query: CcmixterApiQuery, baseUrl = DEFAULT
 
   if (typeof query.limit === 'number') {
     url.searchParams.set('limit', String(query.limit));
+  }
+
+  if (typeof query.offset === 'number') {
+    url.searchParams.set('offset', String(query.offset));
   }
 
   return url;
@@ -141,10 +176,6 @@ export function mapRawApiUpload(raw: RawCcmixterApiUpload): CcmixterApiUploadMap
 
   if (!title) {
     warnings.push('API upload record did not include a recognized title field.');
-  }
-
-  if (typeof bpm !== 'number') {
-    warnings.push('API upload record did not include a recognized BPM field.');
   }
 
   if (tags.length === 0) {

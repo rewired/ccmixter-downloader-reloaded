@@ -201,7 +201,7 @@ describe('DownloadManager', () => {
     const root = await smokeRoot();
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] }),
         resolveByUploadId: async () => []
       }
     });

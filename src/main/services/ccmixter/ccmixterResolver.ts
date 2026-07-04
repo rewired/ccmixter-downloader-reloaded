@@ -19,10 +19,12 @@ import {
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
 import { HAZE_SMOKE_FIXTURE_ID, HAZE_SMOKE_STEM_GROUPS } from '../../sample-data';
-import { ARTIST_CATALOG_QUERY_LIMIT, CcmixterApiClient } from './ccmixterApiClient';
+import { CcmixterApiClient } from './ccmixterApiClient';
 import { CcmixterHtmlClient } from './ccmixterHtmlClient';
 import type {
+  CcmixterArtistCatalogResult,
   CcmixterApiUploadMapping,
+  CcmixterHtmlCatalogResult,
   CcmixterHtmlEnrichment,
   CcmixterResolverDependencies,
   ResolveCcmixterMetadataOptions
@@ -52,6 +54,7 @@ const EVIDENCE_TAG_HINTS = new Set([
   'multiple_formats'
 ]);
 const EVIDENCE_FILENAME_PATTERN = /\b(stems?|sources?|pells?|acapp?ella|instrumental stems?|zip)\b/i;
+const MISSING_BPM_WARNING = 'BPM missing for one or more uploads.';
 
 export class CcmixterResolver {
   private readonly apiClient: CcmixterResolverDependencies['apiClient'];
@@ -83,19 +86,20 @@ export class CcmixterResolver {
       return unresolvedMetadata(input, ['ccMixter API returned no matching uploads.'], createdAt);
     }
 
-    const enrichments = options.enrichHtml === false ? [] : await this.enrichUploads(mappingsResult.mappings);
+    const enrichments = options.enrichHtml === false || isArtistCatalogInput(input) ? [] : await this.enrichUploads(mappingsResult.mappings);
     const groupingCandidates = buildGroupingCandidates(mappingsResult.mappings, enrichments);
-    const groupingResult = groupStemUploads(groupingCandidates);
+    const groupingResult = isArtistCatalogInput(input) ? groupArtistCatalogUploadCandidates(groupingCandidates) : groupStemUploads(groupingCandidates);
     const groups = isArtistCatalogInput(input) ? applyArtistCatalogGroupRules(groupingResult.groups) : groupingResult.groups;
     const uploads = groups.flatMap((group) => group.uploads);
     const files = groups.flatMap((group) => group.files);
     const warnings = [
       ...input.warnings.filter((warning) => !warning.includes('has not been verified')),
-      ...artistCatalogWarnings(input, mappingsResult.mappings),
+      ...artistCatalogWarnings(input, mappingsResult),
       ...mappingsResult.mappings.flatMap((mapping) => mapping.warnings),
       ...enrichments.flatMap((enrichment) => enrichment.warnings),
       ...groups.flatMap((group) => group.warnings),
-      ...groupingResult.warnings
+      ...(isArtistCatalogInput(input) ? groupingResult.warnings.filter((warning) => warning !== MISSING_BPM_WARNING) : groupingResult.warnings),
+      ...mappingsResult.warnings
     ];
     const metadataSource = resolveMetadataSource(groups, enrichments);
 
@@ -134,19 +138,26 @@ export class CcmixterResolver {
 
   private async resolveApiMappings(
     input: CcmixterInput
-  ): Promise<{ ok: true; mappings: CcmixterApiUploadMapping[] } | { ok: false; warning: string }> {
+  ): Promise<{ ok: true; mappings: CcmixterApiUploadMapping[]; pagingIncomplete: boolean; warnings: string[] } | { ok: false; warning: string }> {
     try {
       if (input.uploadId) {
         return {
           ok: true,
-          mappings: await this.apiClient.resolveByUploadId(input.uploadId)
+          mappings: await this.apiClient.resolveByUploadId(input.uploadId),
+          pagingIncomplete: false,
+          warnings: []
         };
       }
 
-      if (input.normalizedArtistLogin) {
+      const artistLogin = input.artistLogin ?? input.normalizedArtistLogin;
+      if (artistLogin) {
+        const catalogResult = await this.resolveArtistCatalog(input, artistLogin);
+
         return {
           ok: true,
-          mappings: await this.apiClient.resolveByArtistLogin(input.normalizedArtistLogin)
+          mappings: catalogResult.mappings,
+          pagingIncomplete: catalogResult.pagingIncomplete,
+          warnings: catalogResult.warnings
         };
       }
 
@@ -158,6 +169,57 @@ export class CcmixterResolver {
       return {
         ok: false,
         warning: error instanceof Error ? error.message : 'ccMixter metadata resolution failed.'
+      };
+    }
+  }
+
+  private async resolveArtistCatalog(input: CcmixterInput, artistLogin: string): Promise<CcmixterArtistCatalogResult> {
+    const primaryResult = await this.apiClient.resolveByArtistLogin(artistLogin);
+    const normalizedLogin = input.normalizedArtistLogin;
+    const shouldTryNormalized =
+      primaryResult.mappings.length === 0 && normalizedLogin !== undefined && normalizedLogin !== artistLogin;
+    const apiResult = shouldTryNormalized ? await this.apiClient.resolveByArtistLogin(normalizedLogin) : primaryResult;
+    const warnings = [...primaryResult.warnings, ...(apiResult === primaryResult ? [] : apiResult.warnings)];
+
+    if (input.kind !== 'artist-link' || !input.sourceUrl || apiResult.mappings.length > 1) {
+      return {
+        ...apiResult,
+        warnings
+      };
+    }
+
+    const htmlCatalog = await this.resolveArtistCatalogFromHtml(input.sourceUrl, input.artistLogin ?? artistLogin);
+    if (!htmlCatalog) {
+      return {
+        ...apiResult,
+        warnings
+      };
+    }
+
+    return {
+      mappings: mergeMappingsByUploadId([...apiResult.mappings, ...htmlCatalog.mappings]),
+      pagingIncomplete: apiResult.pagingIncomplete,
+      warnings: [...warnings, ...htmlCatalog.warnings]
+    };
+  }
+
+  private async resolveArtistCatalogFromHtml(sourceUrl: string, artistLogin: string): Promise<CcmixterHtmlCatalogResult | null> {
+    const htmlClient = this.htmlClient;
+    if (!htmlClient?.resolveArtistCatalogPage) {
+      return null;
+    }
+
+    try {
+      return await htmlClient.resolveArtistCatalogPage(sourceUrl, artistLogin);
+    } catch (error) {
+      return {
+        mappings: [],
+        nextPageUrls: [],
+        warnings: [
+          error instanceof Error
+            ? `HTML artist catalog fallback failed for ${sourceUrl}: ${error.message}`
+            : `HTML artist catalog fallback failed for ${sourceUrl}.`
+        ]
       };
     }
   }
@@ -308,15 +370,18 @@ function hasContributedHtmlData(enrichment: CcmixterHtmlEnrichment): boolean {
   );
 }
 
-function artistCatalogWarnings(input: CcmixterInput, mappings: CcmixterApiUploadMapping[]): string[] {
+function artistCatalogWarnings(
+  input: CcmixterInput,
+  result: { mappings: CcmixterApiUploadMapping[]; pagingIncomplete: boolean }
+): string[] {
   if (!isArtistCatalogInput(input)) {
     return [];
   }
 
   return [
     ARTIST_SCAN_REALITY_CHECK_WARNING,
-    mappings.length >= ARTIST_CATALOG_QUERY_LIMIT ? ARTIST_SCAN_PAGINATION_WARNING : undefined,
-    mappings.some(mappingHasRelatedUploads) ? RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING : undefined
+    result.pagingIncomplete ? ARTIST_SCAN_PAGINATION_WARNING : undefined,
+    result.mappings.some(mappingHasRelatedUploads) ? RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING : undefined
   ].filter((warning): warning is string => typeof warning === 'string');
 }
 
@@ -330,16 +395,58 @@ function mappingHasRelatedUploads(mapping: CcmixterApiUploadMapping): boolean {
 
 function applyArtistCatalogGroupRules(groups: StemGroup[]): StemGroup[] {
   return groups.map((group) => {
-    if (hasExplicitSourceStemArchiveEvidence(group)) {
-      return group;
+    const catalogGroup = {
+      ...group,
+      unverifiedFields: group.unverifiedFields.filter((field) => field !== 'bpm'),
+      warnings: group.warnings.filter((warning) => warning !== MISSING_BPM_WARNING)
+    };
+
+    if (hasExplicitSourceStemArchiveEvidence(catalogGroup)) {
+      return catalogGroup;
     }
 
     return {
-      ...group,
+      ...catalogGroup,
       confidence: 'low',
-      warnings: [...group.warnings, ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING].filter((warning, index, all) => all.indexOf(warning) === index)
+      warnings: [...catalogGroup.warnings, ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING].filter((warning, index, all) => all.indexOf(warning) === index)
     };
   });
+}
+
+function groupArtistCatalogUploadCandidates(candidates: GroupingUploadCandidate[]): ReturnType<typeof groupStemUploads> {
+  const groups = candidates.flatMap((candidate) => {
+    const group = groupStemUploads([candidate]).groups[0];
+    if (!group) {
+      return [];
+    }
+
+    const upload = group.uploads[0];
+    return [
+      {
+        ...group,
+        groupId: upload ? `ccmixter-catalog-${upload.artistLogin}-${upload.uploadId}` : group.groupId
+      }
+    ];
+  });
+
+  return {
+    groups,
+    signals: [],
+    warnings: groups.flatMap((group) => group.warnings).filter((warning, index, all) => all.indexOf(warning) === index)
+  };
+}
+
+function mergeMappingsByUploadId(mappings: CcmixterApiUploadMapping[]): CcmixterApiUploadMapping[] {
+  const byUploadId = new Map<string, CcmixterApiUploadMapping>();
+
+  for (const mapping of mappings) {
+    const existing = byUploadId.get(mapping.upload.uploadId);
+    if (!existing || existing.files.length === 0) {
+      byUploadId.set(mapping.upload.uploadId, mapping);
+    }
+  }
+
+  return [...byUploadId.values()];
 }
 
 function hasExplicitSourceStemArchiveEvidence(group: StemGroup): boolean {

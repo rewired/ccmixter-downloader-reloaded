@@ -22,6 +22,7 @@ describe('parseCcmixterInput', () => {
   it('parses artist links', () => {
     expect(parseCcmixterInput('https://ccmixter.org/people/WiseMan')).toMatchObject({
       kind: 'artist-link',
+      artistLogin: 'WiseMan',
       normalizedArtistLogin: 'wiseman'
     });
   });
@@ -36,6 +37,7 @@ describe('parseCcmixterInput', () => {
   it('parses plain artist names', () => {
     expect(parseCcmixterInput('Lukas Engelke')).toMatchObject({
       kind: 'artist-name',
+      artistLogin: 'Lukas_Engelke',
       normalizedArtistLogin: 'lukas_engelke'
     });
   });

@@ -11,7 +11,7 @@ import { withDownloadCandidateClassification } from './classification';
 
 export const ARTIST_SCAN_REALITY_CHECK_WARNING =
   'Artist scan may include previews, remixes, and non-stem uploads. Review carefully before downloading.';
-export const ARTIST_SCAN_PAGINATION_WARNING = 'Artist pagination is not implemented in this slice. Results may be incomplete.';
+export const ARTIST_SCAN_PAGINATION_WARNING = 'Artist catalog paging stopped before completion. Results may be incomplete.';
 export const RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING = 'Related uploads are detected but not recursively resolved.';
 export const ARTIST_CATALOG_NO_STEM_EVIDENCE_WARNING =
   'Artist catalog group has no explicit source, stem, or archive evidence.';
@@ -80,10 +80,13 @@ export function parseCcmixterInput(raw: string): CcmixterInput {
   }
 
   if (/^[a-zA-Z0-9][a-zA-Z0-9._ -]{1,63}$/.test(trimmed) && /[a-zA-Z]/.test(trimmed)) {
+    const artistLogin = preserveArtistLogin(trimmed);
+
     return {
       raw,
       kind: 'artist-name',
-      normalizedArtistLogin: normalizeArtistLogin(trimmed),
+      artistLogin,
+      normalizedArtistLogin: normalizeArtistLogin(artistLogin),
       warnings: ['Artist name is parsed locally; ccMixter artist identity has not been verified.']
     };
   }
@@ -261,10 +264,13 @@ function parseUrl(raw: string): CcmixterInput | null {
   const artist = artistFromPeople ?? artistFromFiles;
 
   if (artist && !/^\d+$/.test(artist)) {
+    const artistLogin = preserveArtistLogin(decodeURIComponent(artist));
+
     return {
       raw,
       kind: 'artist-link',
-      normalizedArtistLogin: normalizeArtistLogin(decodeURIComponent(artist)),
+      artistLogin,
+      normalizedArtistLogin: normalizeArtistLogin(artistLogin),
       sourceUrl: parsed.toString(),
       warnings: ['Artist link is parsed locally; ccMixter artist identity has not been verified.']
     };
@@ -302,6 +308,10 @@ function isAllowedCcmixterHostname(hostname: string): boolean {
 
 function normalizeArtistLogin(value: string): string {
   return value.trim().replace(/\s+/g, '_').toLowerCase();
+}
+
+function preserveArtistLogin(value: string): string {
+  return value.trim().replace(/\s+/g, '_');
 }
 
 function joinDomainPath(root: string, relativePath: string): string {

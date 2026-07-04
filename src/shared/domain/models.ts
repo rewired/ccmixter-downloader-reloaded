@@ -9,6 +9,7 @@ export type CcmixterInputKind =
 export interface CcmixterInput {
   raw: string;
   kind: CcmixterInputKind;
+  artistLogin?: string;
   normalizedArtistLogin?: string;
   uploadId?: string;
   fixtureId?: string;

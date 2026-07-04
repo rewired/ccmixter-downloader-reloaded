@@ -3,7 +3,7 @@ import path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
+import { parseCcmixterArtistCatalogHtml, parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
 
 describe('parseCcmixterUploadHtml', () => {
   it('extracts conservative metadata from an upload-page fixture', async () => {
@@ -56,5 +56,18 @@ describe('parseCcmixterUploadHtml', () => {
     ]);
     expect(enrichment.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/2440');
     expect(enrichment.relatedUploadUrls).toContain('https://ccmixter.org/files/zrox/5220');
+  });
+});
+
+describe('parseCcmixterArtistCatalogHtml', () => {
+  it('extracts visible catalog uploads without requiring BPM or downloadable files', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/artist-catalog-page.html'), 'utf8');
+    const catalog = parseCcmixterArtistCatalogHtml(html, 'https://ccmixter.org/people/7OOP3D', '7OOP3D');
+
+    expect(catalog.mappings.map((mapping) => mapping.upload.uploadId)).toEqual(['70001', '70002', '70003']);
+    expect(catalog.mappings.map((mapping) => mapping.upload.title)).toEqual(['Pulse Map', 'Night Voltage', 'No Tempo Sketch']);
+    expect(catalog.mappings.map((mapping) => mapping.upload.bpm)).toEqual([121, 83, undefined]);
+    expect(catalog.mappings.every((mapping) => mapping.files.length === 0)).toBe(true);
+    expect(catalog.nextPageUrls).toEqual(['https://ccmixter.org/people/7OOP3D?offset=12']);
   });
 });

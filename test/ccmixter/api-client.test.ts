@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING } from '../../src/shared/domain';
 import {
+  ARTIST_CATALOG_MAX_PAGES,
   buildCcmixterQueryUrl,
   CcmixterApiClient,
   mapRawApiUpload,
@@ -18,13 +19,14 @@ describe('CcmixterApiClient URL building', () => {
     const url = buildCcmixterQueryUrl(
       {
         artistLogin: 'Wise Man',
-        dataview: 'info',
-        limit: 100
+        dataview: 'default',
+        limit: 100,
+        offset: 200
       },
       'https://ccmixter.org/api/query'
     );
 
-    expect(url.toString()).toBe('https://ccmixter.org/api/query?f=json&dataview=info&user=Wise+Man&limit=100');
+    expect(url.toString()).toBe('https://ccmixter.org/api/query?f=json&dataview=default&user=Wise+Man&limit=100&offset=200');
   });
 
   it('builds upload ID query URLs safely', () => {
@@ -68,8 +70,71 @@ describe('CcmixterApiClient mapping', () => {
 
     const result = await client.resolveByArtistLogin('WiseMan');
 
-    expect(result.map((mapping) => mapping.upload.uploadId)).toEqual(['64501', '64502']);
-    expect(result[1]?.files[0]?.originalFilename).toBe('VOCALS.flac');
+    expect(result.mappings.map((mapping) => mapping.upload.uploadId)).toEqual(['64501', '64502']);
+    expect(result.mappings[1]?.files[0]?.originalFilename).toBe('VOCALS.flac');
+    expect(result.pagingIncomplete).toBe(false);
+  });
+
+  it('pages artist catalog queries with offset and dedupes by upload ID', async () => {
+    const requestedUrls: string[] = [];
+    const client = new CcmixterApiClient({
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        requestedUrls.push(url.toString());
+        const offset = Number(url.searchParams.get('offset') ?? '0');
+        const page =
+          offset === 0
+            ? Array.from({ length: 100 }, (_value, index) => ({
+                upload_id: index === 99 ? 1 : index + 1,
+                upload_name: index === 99 ? 'One Duplicate' : `Upload ${index + 1}`,
+                user_name: 'WiseMan',
+                user_real_name: 'Wiseman',
+                upload_tags: 'audio'
+              }))
+            : [{ upload_id: 2, upload_name: 'Two', user_name: 'WiseMan', user_real_name: 'Wiseman', upload_tags: 'audio' }];
+
+        return new Response(JSON.stringify(page), { status: 200 });
+      }
+    });
+
+    const result = await client.resolveByArtistLogin('WiseMan');
+
+    expect(result.mappings.map((mapping) => mapping.upload.uploadId)).toContain('1');
+    expect(result.mappings.map((mapping) => mapping.upload.uploadId)).toContain('2');
+    expect(result.mappings.filter((mapping) => mapping.upload.uploadId === '1')).toHaveLength(1);
+    expect(requestedUrls[0]).toContain('dataview=default');
+    expect(requestedUrls[0]).toContain('user=WiseMan');
+    expect(requestedUrls[0]).toContain('offset=0');
+    expect(requestedUrls[1]).toContain('offset=100');
+  });
+
+  it('reports incomplete paging when artist catalog reaches the max page guard', async () => {
+    let requestCount = 0;
+    const client = new CcmixterApiClient({
+      fetchImpl: async () => {
+        const pageBase = requestCount * 100;
+        requestCount += 1;
+
+        return new Response(
+          JSON.stringify(
+            Array.from({ length: 100 }, (_value, index) => ({
+              upload_id: pageBase + index,
+              upload_name: `Upload ${pageBase + index}`,
+              user_name: 'WiseMan',
+              user_real_name: 'Wiseman',
+              upload_tags: 'audio'
+            }))
+          ),
+          { status: 200 }
+        );
+      }
+    });
+
+    const result = await client.resolveByArtistLogin('WiseMan');
+
+    expect(requestCount).toBe(ARTIST_CATALOG_MAX_PAGES);
+    expect(result.pagingIncomplete).toBe(true);
+    expect(result.warnings).toContain('Artist catalog API paging reached the maximum page guard.');
   });
 
   it('adds warnings for missing optional metadata instead of fabricating certainty', () => {

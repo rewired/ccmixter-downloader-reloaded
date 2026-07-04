@@ -4,7 +4,7 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { mapRawApiUpload, parseCcmixterApiResponse } from '../../src/main/services/ccmixter/ccmixterApiClient';
-import { parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
+import { parseCcmixterArtistCatalogHtml, parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
 import { buildGroupingCandidates, CcmixterResolver } from '../../src/main/services/ccmixter/ccmixterResolver';
 import { groupStemUploads } from '../../src/main/services/grouping/stemGrouper';
 import {
@@ -24,7 +24,7 @@ describe('CcmixterResolver', () => {
     const html = await readFile(path.resolve('test/fixtures/ccmixter/upload-page.html'), 'utf8');
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => parseCcmixterApiResponse(uploadFixture).map((upload) => mapRawApiUpload(upload))
       },
       htmlClient: {
@@ -44,7 +44,7 @@ describe('CcmixterResolver', () => {
   it('returns resolver warnings when metadata is missing', async () => {
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => parseCcmixterApiResponse(missingFieldsFixture).map((upload) => mapRawApiUpload(upload))
       },
       htmlClient: {
@@ -84,7 +84,7 @@ describe('CcmixterResolver', () => {
       apiClient: {
         resolveByArtistLogin: async (artistLogin) => {
           artistCalls.push(artistLogin);
-          return unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload));
+          return catalog(unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload)));
         },
         resolveByUploadId: async () => []
       }
@@ -92,7 +92,7 @@ describe('CcmixterResolver', () => {
 
     const metadata = await resolver.resolveMetadata('https://ccmixter.org/people/WiseMan', { enrichHtml: false });
 
-    expect(artistCalls).toEqual(['wiseman']);
+    expect(artistCalls).toEqual(['WiseMan']);
     expect(metadata.input.kind).toBe('artist-link');
     expect(metadata.warnings).toContain(ARTIST_SCAN_REALITY_CHECK_WARNING);
     expect(metadata.warnings).not.toContain(ARTIST_SCAN_PAGINATION_WARNING);
@@ -104,13 +104,58 @@ describe('CcmixterResolver', () => {
     expect(metadata.files).toHaveLength(2);
   });
 
+  it('uses artist HTML fallback once for one-record people-page catalog results and keeps missing-BPM uploads visible', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/artist-catalog-page.html'), 'utf8');
+    const artistCalls: string[] = [];
+    let htmlFallbackCount = 0;
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async (artistLogin) => {
+          artistCalls.push(artistLogin);
+          return catalog([
+            mapRawApiUpload({
+              upload_id: '70001',
+              upload_name: 'Pulse Map',
+              user_name: '7OOP3D',
+              user_real_name: '7OOP3D',
+              upload_bpm: 121,
+              upload_tags: 'sample stems',
+              license_name: 'Attribution (4.0)',
+              file_page_url: 'https://ccmixter.org/files/7OOP3D/70001'
+            })
+          ]);
+        },
+        resolveByUploadId: async () => []
+      },
+      htmlClient: {
+        enrichUploadPage: async (sourceUrl) => parseCcmixterUploadHtml(html, sourceUrl),
+        resolveArtistCatalogPage: async (sourceUrl, artistLogin) => {
+          htmlFallbackCount += 1;
+          return parseCcmixterArtistCatalogHtml(html, sourceUrl, artistLogin);
+        }
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('https://ccmixter.org/people/7OOP3D');
+
+    expect(artistCalls).toEqual(['7OOP3D']);
+    expect(htmlFallbackCount).toBe(1);
+    expect(metadata.input.artistLogin).toBe('7OOP3D');
+    expect(metadata.uploads.map((upload) => upload.uploadId)).toEqual(['70001', '70002', '70003']);
+    expect(metadata.groups.map((group) => group.uploads[0]?.uploadId)).toEqual(['70001', '70002', '70003']);
+    expect(metadata.groups).toHaveLength(3);
+    expect(metadata.files).toHaveLength(0);
+    expect(metadata.uploads.map((upload) => upload.bpm)).toEqual([121, 83, undefined]);
+    expect(metadata.warnings).not.toContain('BPM missing for one or more uploads.');
+  });
+
   it('treats plain artist-name inputs as artist catalog scans', async () => {
     const artistCalls: string[] = [];
     const resolver = new CcmixterResolver({
       apiClient: {
         resolveByArtistLogin: async (artistLogin) => {
           artistCalls.push(artistLogin);
-          return unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload));
+          return catalog(unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload)));
         },
         resolveByUploadId: async () => []
       },
@@ -131,7 +176,7 @@ describe('CcmixterResolver', () => {
       selectedAt: '2026-07-03T00:00:00.000Z'
     });
 
-    expect(artistCalls).toEqual(['wiseman']);
+    expect(artistCalls).toEqual(['WiseMan']);
     expect(plan.input.kind).toBe('artist-name');
     expect(plan.warnings).toContain(ARTIST_SCAN_REALITY_CHECK_WARNING);
     expect(plan.warnings).not.toContain(ARTIST_SCAN_PAGINATION_WARNING);
@@ -140,27 +185,48 @@ describe('CcmixterResolver', () => {
     expect(plan.plannedFiles).toHaveLength(2);
   });
 
-  it('warns about artist pagination only when the artist API result reaches the current slice limit', async () => {
+  it('falls back to normalized artist login only when exact spelling returns no catalog uploads', async () => {
+    const artistCalls: string[] = [];
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async (artistLogin) => {
+          artistCalls.push(artistLogin);
+          return artistLogin === 'WiseMan' ? catalog([]) : catalog(unrelatedCatalogUploads().map((upload) => mapRawApiUpload(upload)));
+        },
+        resolveByUploadId: async () => []
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('WiseMan', { enrichHtml: false });
+
+    expect(artistCalls).toEqual(['WiseMan', 'wiseman']);
+    expect(metadata.uploads.map((upload) => upload.uploadId)).toEqual(['80001', '80002']);
+  });
+
+  it('warns about artist pagination only when the artist API reports incomplete paging', async () => {
     const resolver = new CcmixterResolver({
       apiClient: {
         resolveByArtistLogin: async () =>
-          Array.from({ length: 100 }, (_value, index) =>
-            mapRawApiUpload({
-              upload_id: `page-${index}`,
-              upload_name: `Catalog Upload ${index}`,
-              user_name: 'WiseMan',
-              user_real_name: 'Wiseman',
-              upload_bpm: 100 + index,
-              upload_tags: 'audio mp3',
-              license_name: 'Creative Commons Attribution',
-              file_page_url: `https://ccmixter.org/files/WiseMan/page-${index}`,
-              files: [
-                {
-                  file_name: `catalog-${index}.mp3`,
-                  download_url: `https://ccmixter.org/content/WiseMan/catalog-${index}.mp3`
-                }
-              ]
-            })
+          catalog(
+            Array.from({ length: 100 }, (_value, index) =>
+              mapRawApiUpload({
+                upload_id: `page-${index}`,
+                upload_name: `Catalog Upload ${index}`,
+                user_name: 'WiseMan',
+                user_real_name: 'Wiseman',
+                upload_bpm: 100 + index,
+                upload_tags: 'audio mp3',
+                license_name: 'Creative Commons Attribution',
+                file_page_url: `https://ccmixter.org/files/WiseMan/page-${index}`,
+                files: [
+                  {
+                    file_name: `catalog-${index}.mp3`,
+                    download_url: `https://ccmixter.org/content/WiseMan/catalog-${index}.mp3`
+                  }
+                ]
+              })
+            ),
+            true
           ),
         resolveByUploadId: async () => []
       }
@@ -174,7 +240,7 @@ describe('CcmixterResolver', () => {
   it('creates dry-run path planning from resolved metadata', async () => {
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => parseCcmixterApiResponse(uploadFixture).map((upload) => mapRawApiUpload(upload))
       },
       htmlClient: {
@@ -204,7 +270,7 @@ describe('CcmixterResolver', () => {
   it('creates fixture smoke metadata explicitly for fixture:haze-smoke', async () => {
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => []
       }
     });
@@ -225,7 +291,7 @@ describe('CcmixterResolver', () => {
   it('returns a visible warning for unknown fixture IDs', async () => {
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => []
       }
     });
@@ -240,7 +306,7 @@ describe('CcmixterResolver', () => {
     const html = await readFile(path.resolve('test/fixtures/ccmixter/haze-56384-page.html'), 'utf8');
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => parseCcmixterApiResponse(hazeFixture).map((upload) => mapRawApiUpload(upload))
       },
       htmlClient: {
@@ -276,7 +342,7 @@ describe('CcmixterResolver', () => {
     let htmlFetchCount = 0;
     const resolver = new CcmixterResolver({
       apiClient: {
-        resolveByArtistLogin: async () => [],
+        resolveByArtistLogin: async () => catalog([]),
         resolveByUploadId: async () => parseCcmixterApiResponse(soundbitchFixture).map((upload) => mapRawApiUpload(upload))
       },
       htmlClient: {
@@ -307,6 +373,14 @@ describe('CcmixterResolver', () => {
     );
   });
 });
+
+function catalog(mappings: ReturnType<typeof mapRawApiUpload>[], pagingIncomplete = false) {
+  return {
+    mappings,
+    pagingIncomplete,
+    warnings: pagingIncomplete ? ['Artist catalog API paging reached the maximum page guard.'] : []
+  };
+}
 
 function unrelatedCatalogUploads(): Record<string, unknown>[] {
   return [

@@ -399,7 +399,7 @@ export function App(): JSX.Element {
                 </div>
                 <div>
                   <dt>Artist login</dt>
-                  <dd>{parsedInput.normalizedArtistLogin ?? 'not specified'}</dd>
+                  <dd>{parsedInput.artistLogin ?? parsedInput.normalizedArtistLogin ?? 'not specified'}</dd>
                 </div>
                 <div>
                   <dt>Upload ID</dt>

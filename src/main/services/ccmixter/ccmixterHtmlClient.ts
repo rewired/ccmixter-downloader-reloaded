@@ -1,5 +1,10 @@
-import { buildTrackFile } from './ccmixterApiClient';
-import type { CcmixterHtmlClientOptions, CcmixterHtmlEnrichment, HtmlFileCandidate } from './ccmixterTypes';
+import { buildTrackFile, mapRawApiUpload } from './ccmixterApiClient';
+import type {
+  CcmixterHtmlCatalogResult,
+  CcmixterHtmlClientOptions,
+  CcmixterHtmlEnrichment,
+  HtmlFileCandidate
+} from './ccmixterTypes';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const FILE_LINK_PATTERN = /\.(?:mp3|flac|wav|aif|aiff|ogg|m4a|zip)(?:[?#][^"'\s<>]*)?$/i;
@@ -18,6 +23,11 @@ export class CcmixterHtmlClient {
   async enrichUploadPage(sourceUrl: string): Promise<CcmixterHtmlEnrichment> {
     const html = await this.fetchHtml(sourceUrl);
     return parseCcmixterUploadHtml(html, sourceUrl);
+  }
+
+  async resolveArtistCatalogPage(sourceUrl: string, artistLogin: string): Promise<CcmixterHtmlCatalogResult> {
+    const html = await this.fetchHtml(sourceUrl);
+    return parseCcmixterArtistCatalogHtml(html, sourceUrl, artistLogin);
   }
 
   private async fetchHtml(sourceUrl: string): Promise<string> {
@@ -47,6 +57,67 @@ export class CcmixterHtmlClient {
       clearTimeout(timeout);
     }
   }
+}
+
+export function parseCcmixterArtistCatalogHtml(
+  html: string,
+  sourceUrl = 'https://ccmixter.org',
+  artistLogin?: string
+): CcmixterHtmlCatalogResult {
+  const uploadsById = new Map<string, ReturnType<typeof mapRawApiUpload>>();
+  const fileLinkPattern = /<a\b[^>]*href=["']([^"'>]*\/files\/([^"'/?#>]+)\/(\d+)[^"'>]*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = fileLinkPattern.exec(html)) !== null) {
+    const href = decodeHtml(match[1] ?? '');
+    const linkedArtistLogin = decodeURIComponentSafe(match[2]) ?? match[2] ?? artistLogin;
+    const uploadId = match[3];
+
+    if (!uploadId || (artistLogin && linkedArtistLogin && linkedArtistLogin.toLowerCase() !== artistLogin.toLowerCase())) {
+      continue;
+    }
+
+    if (uploadsById.has(uploadId)) {
+      continue;
+    }
+
+    const block = extractUploadBlock(html, match.index);
+    const title = decodeHtml(stripTags(match[4] ?? '')).trim() || `ccMixter upload ${uploadId}`;
+    const artist = parseArtistFromCatalogBlock(block, linkedArtistLogin ?? artistLogin ?? 'unknown_artist');
+    const tags = parseTags(block);
+    const uploadedAt = parseCatalogDate(block);
+    const bpm = parseBpm(block, decodeHtml(stripTags(block))) ?? parseBpmFromTags(tags);
+    const licenseSummary = parseCatalogLicense(block);
+    const resolvedUrl = resolveUrl(href, sourceUrl);
+
+    uploadsById.set(
+      uploadId,
+      mapRawApiUpload({
+        upload_id: uploadId,
+        upload_name: title,
+        user_name: artist.login,
+        user_real_name: artist.displayName,
+        upload_bpm: bpm,
+        upload_tags: tags.join(','),
+        file_page_url: resolvedUrl,
+        upload_date: uploadedAt,
+        license_name: licenseSummary
+      })
+    );
+  }
+
+  const nextPageUrls = parseCatalogPageUrls(html, sourceUrl);
+  const mappings = [...uploadsById.values()];
+  const warnings =
+    mappings.length === 0
+      ? ['HTML artist catalog fallback did not find visible upload catalog entries.']
+      : ['HTML artist catalog fallback was used for upload discovery.'];
+
+  return {
+    mappings,
+    nextPageUrls,
+    warnings
+  };
 }
 
 export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): CcmixterHtmlEnrichment {
@@ -101,9 +172,32 @@ function parseBpm(html: string, text: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseBpmFromTags(tags: string[]): number | undefined {
+  for (const tag of tags) {
+    const rangeMatch = /^bpm_(\d{2,3})_(\d{2,3})$/i.exec(tag);
+    if (rangeMatch) {
+      const low = Number.parseInt(rangeMatch[1]!, 10);
+      const high = Number.parseInt(rangeMatch[2]!, 10);
+      if (Number.isFinite(low) && Number.isFinite(high)) {
+        return Math.round((low + high) / 2);
+      }
+    }
+
+    const exactMatch = /^bpm_(\d{2,3})$/i.exec(tag);
+    if (exactMatch) {
+      const exact = Number.parseInt(exactMatch[1]!, 10);
+      if (Number.isFinite(exact)) {
+        return exact;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function parseTags(html: string): string[] {
   const tags = new Set<string>();
-  const linkPattern = /<a\b[^>]*href=["'][^"']*(?:\/tags\/|[?&]tags?=)([^"'&/#?]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const linkPattern = /<a\b[^>]*href=["'][^"'>]*(?:\/tags\/|[?&]tags?=)([^"'&/#?>]+)[^"'>]*["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = linkPattern.exec(html)) !== null) {
@@ -119,6 +213,15 @@ function parseTags(html: string): string[] {
   return [...tags];
 }
 
+function parseCatalogLicense(html: string): string | undefined {
+  const titleMatch = /<a\b[^>]*rel=["']license["'][^>]*title=["']([^"']+)["'][^>]*>/i.exec(html);
+  if (titleMatch?.[1]) {
+    return decodeHtml(titleMatch[1]).trim();
+  }
+
+  return parseLicenseSummary(html, decodeHtml(stripTags(html)));
+}
+
 function parseLicenseSummary(html: string, text: string): string | undefined {
   const licenseLink = /<a\b[^>]*href=["']([^"']*creativecommons\.org\/licenses\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(html);
 
@@ -129,6 +232,52 @@ function parseLicenseSummary(html: string, text: string): string | undefined {
 
   const textMatch = CC_LICENSE_PATTERN.exec(text);
   return textMatch?.[0]?.trim();
+}
+
+function extractUploadBlock(html: string, linkIndex: number): string {
+  const before = html.slice(0, linkIndex);
+  const blockStart = Math.max(before.lastIndexOf('<div class="upload"'), before.lastIndexOf("<div class='upload'"));
+  const effectiveStart = blockStart >= 0 ? blockStart : linkIndex;
+  const after = html.slice(effectiveStart + 1);
+  const nextDoubleQuote = after.search(/<div class="upload"\b/i);
+  const nextSingleQuote = after.search(/<div class='upload'\b/i);
+  const candidates = [nextDoubleQuote, nextSingleQuote].filter((index) => index >= 0);
+  const nextBlock = candidates.length > 0 ? Math.min(...candidates) : -1;
+
+  return html.slice(effectiveStart, nextBlock >= 0 ? effectiveStart + 1 + nextBlock : undefined);
+}
+
+function parseArtistFromCatalogBlock(block: string, fallbackLogin: string): { login: string; displayName: string } {
+  const artistMatch = /<a\b[^>]*href=["'][^"']*\/people\/([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(block);
+  const login = decodeURIComponentSafe(artistMatch?.[1]) ?? fallbackLogin;
+  const displayName = decodeHtml(stripTags(artistMatch?.[2] ?? '')).trim() || login;
+
+  return {
+    login,
+    displayName
+  };
+}
+
+function parseCatalogDate(block: string): string | undefined {
+  const dateMatch = /<div\b[^>]*class=["'][^"']*upload_date[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/i.exec(block);
+  const raw = decodeHtml(stripTags(dateMatch?.[1] ?? '')).replace(/\bRecommends\s*\(\d+\)/i, '').trim();
+
+  return raw.length > 0 ? raw.replace(/\s+/g, ' ') : undefined;
+}
+
+function parseCatalogPageUrls(html: string, sourceUrl: string): string[] {
+  const urls = new Set<string>();
+  const pageLinkPattern = /<a\b[^>]*href=["']([^"']*(?:[?&]offset=\d+|[?&]paging=)[^"']*)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = pageLinkPattern.exec(html)) !== null) {
+    const resolved = resolveUrl(decodeHtml(match[1] ?? ''), sourceUrl);
+    if (resolved) {
+      urls.add(resolved);
+    }
+  }
+
+  return [...urls];
 }
 
 function parseFileCandidates(html: string, sourceUrl?: string): HtmlFileCandidate[] {
@@ -226,7 +375,7 @@ function parseZipFileHints(text: string): string[] {
 function parseRelatedUploadUrls(html: string, sourceUrl?: string): string[] {
   const urls = new Set<string>();
   const sourceAbsolute = sourceUrl ? resolveUrl(sourceUrl) : undefined;
-  const linkPattern = /<a\b[^>]*href=["']([^"']*\/files\/[^"']+\/\d+[^"']*)["'][^>]*>/gi;
+  const linkPattern = /<a\b[^>]*href=["']([^"'>]*\/files\/[^"'>]+\/\d+[^"'>]*)["'][^>]*>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = linkPattern.exec(html)) !== null) {

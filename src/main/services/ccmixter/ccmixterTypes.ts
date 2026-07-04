@@ -5,8 +5,9 @@ export type RawCcmixterApiUpload = Record<string, unknown>;
 export interface CcmixterApiQuery {
   artistLogin?: string;
   uploadId?: string;
-  dataview?: 'info' | 'files';
+  dataview?: 'default' | 'info' | 'files';
   limit?: number;
+  offset?: number;
 }
 
 export interface CcmixterApiClientOptions {
@@ -18,6 +19,12 @@ export interface CcmixterApiClientOptions {
 export interface CcmixterApiUploadMapping {
   upload: TrackUpload;
   files: TrackFile[];
+  warnings: string[];
+}
+
+export interface CcmixterArtistCatalogResult {
+  mappings: CcmixterApiUploadMapping[];
+  pagingIncomplete: boolean;
   warnings: string[];
 }
 
@@ -37,6 +44,12 @@ export interface CcmixterHtmlEnrichment {
   warnings: string[];
 }
 
+export interface CcmixterHtmlCatalogResult {
+  mappings: CcmixterApiUploadMapping[];
+  nextPageUrls: string[];
+  warnings: string[];
+}
+
 export interface CcmixterHtmlClientOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -48,10 +61,11 @@ export interface ResolveCcmixterMetadataOptions {
 
 export interface CcmixterResolverDependencies {
   apiClient: {
-    resolveByArtistLogin(artistLogin: string): Promise<CcmixterApiUploadMapping[]>;
+    resolveByArtistLogin(artistLogin: string): Promise<CcmixterArtistCatalogResult>;
     resolveByUploadId(uploadId: string): Promise<CcmixterApiUploadMapping[]>;
   };
   htmlClient?: {
     enrichUploadPage(sourceUrl: string): Promise<CcmixterHtmlEnrichment>;
+    resolveArtistCatalogPage?(sourceUrl: string, artistLogin: string): Promise<CcmixterHtmlCatalogResult>;
   };
 }
