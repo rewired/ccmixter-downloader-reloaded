@@ -212,5 +212,6 @@ export interface ArtistCatalogPageResult {
   loadedCount: number;
   totalCount?: number;
   hasMore: boolean;
+  pagingIncomplete: boolean;
   warnings: string[];
 }

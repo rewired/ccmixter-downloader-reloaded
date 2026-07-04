@@ -357,6 +357,82 @@ describe('ArtistCatalogSessionManager', () => {
     expect(allIds.size).toBe(25);
   });
 
+  it('does not silently complete on a duplicate-only page when totalCount says more remain, and marks pagingIncomplete after recovery fails', async () => {
+    const firstIds = Array.from({ length: 240 }, (_, i) => String(i + 1));
+    const apiPage = vi.fn()
+      .mockResolvedValueOnce(makePage(firstIds))
+      // Every subsequent page (regardless of offset) returns only ids already seen.
+      .mockResolvedValue(makePage(['238', '239', '240']));
+
+    const catalogPage = vi.fn().mockResolvedValue({
+      mappings: [],
+      nextPageUrls: [],
+      totalCount: 553,
+      warnings: []
+    });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: { resolveArtistCatalogPage: catalogPage }
+    });
+
+    const start = await manager.startSession('bigArtist', 'https://ccmixter.org/people/bigArtist');
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    expect(start.value.loadedCount).toBe(240);
+    expect(start.value.totalCount).toBe(553);
+
+    const more = await manager.loadMore(start.value.sessionId);
+    expect(more.ok).toBe(true);
+    if (!more.ok) return;
+
+    // Must not silently report completion: loadedCount is still well below totalCount.
+    expect(more.value.loadedCount).toBe(240);
+    expect(more.value.pagingIncomplete).toBe(true);
+  });
+
+  it('recovers from a duplicate-only API page by advancing the offset and continues loading', async () => {
+    const firstIds = Array.from({ length: 12 }, (_, i) => String(i + 1));
+    const apiPage = vi.fn()
+      .mockResolvedValueOnce(makePage(firstIds))
+      // Offset 12: duplicate-only page.
+      .mockResolvedValueOnce(makePage(firstIds))
+      // Offset 24 (advanced by the observed page size): fresh ids.
+      .mockResolvedValueOnce(makePage(['13', '14', '15']));
+
+    const catalogPage = vi.fn().mockResolvedValue({
+      mappings: [],
+      nextPageUrls: [],
+      totalCount: 100,
+      warnings: []
+    });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: { resolveArtistCatalogPage: catalogPage }
+    });
+
+    const start = await manager.startSession('recoverArtist', 'https://ccmixter.org/people/recoverArtist');
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    expect(start.value.loadedCount).toBe(12);
+
+    const more = await manager.loadMore(start.value.sessionId);
+    expect(more.ok).toBe(true);
+    if (!more.ok) return;
+
+    expect(more.value.loadedCount).toBe(15);
+    expect(more.value.hasMore).toBe(true);
+    expect(more.value.pagingIncomplete).toBe(false);
+    expect(apiPage).toHaveBeenCalledTimes(3);
+  });
+
   it('stops at max page guard', async () => {
     const pageWithOneItem = makePage(['1']);
     const apiPage = vi.fn().mockResolvedValue(pageWithOneItem);

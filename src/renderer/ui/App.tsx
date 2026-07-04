@@ -121,6 +121,7 @@ export function App(): JSX.Element {
               ...prev,
               loadedCount: page.loadedCount,
               hasMore: page.hasMore,
+              pagingIncomplete: page.pagingIncomplete,
               totalCount: page.totalCount ?? prev.totalCount,
               groups: page.groups
             }
@@ -485,7 +486,7 @@ export function App(): JSX.Element {
           <section className="banner artist-scan-banner" role="status">
             <strong>Review artist uploads</strong>
             <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
-            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
+            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
           </section>
         ) : null}
 
@@ -570,7 +571,7 @@ export function App(): JSX.Element {
             {dryRunPlan ? (
               <>
                 <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
                 {reviewSession ? (
                   <ReviewGroupList reviewSession={reviewSession} onChange={setReviewSession} />
                 ) : (
@@ -612,7 +613,7 @@ export function App(): JSX.Element {
             ) : resolvedMetadata ? (
               <>
                 <GroupList groups={resolvedMetadata.groups} />
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} /> : null}
+                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
                 {resolvedMetadata.warnings.length > 0 ? (
                   <ul className="warning-list">
                     {resolvedMetadata.warnings.map((warning) => (
@@ -675,10 +676,15 @@ export function resolveArtistCatalogStatus(
   hasMore: boolean,
   loadedCount: number,
   totalCount: number | undefined,
-  catalogIsLoadingMore: boolean
+  catalogIsLoadingMore: boolean,
+  pagingIncomplete = false
 ): string | null {
   if (catalogIsLoadingMore) {
     return 'Loading more uploads…';
+  }
+
+  if (pagingIncomplete) {
+    return `Catalog incomplete: ${loadedCount}${typeof totalCount === 'number' ? ` of ${totalCount}` : ''} loaded`;
   }
 
   if (hasMore) {
@@ -686,6 +692,11 @@ export function resolveArtistCatalogStatus(
   }
 
   if (loadedCount > 0) {
+    // Only claim completion when the loaded count actually reaches the known total (or no total is
+    // known and the source itself reported it was exhausted) - never on a paging source giving up early.
+    if (typeof totalCount === 'number' && loadedCount < totalCount) {
+      return `${loadedCount} of ${totalCount} loaded`;
+    }
     return `All ${typeof totalCount === 'number' ? totalCount : loadedCount} uploads loaded`;
   }
 
@@ -695,13 +706,15 @@ export function resolveArtistCatalogStatus(
 function ArtistCatalogCounts({
   counts,
   catalogIsLoadingMore,
-  hasMore
+  hasMore,
+  pagingIncomplete
 }: {
   counts: ArtistCatalogCounts;
   catalogIsLoadingMore: boolean;
   hasMore: boolean;
+  pagingIncomplete: boolean;
 }): JSX.Element {
-  const status = resolveArtistCatalogStatus(hasMore, counts.loadedCount, counts.totalCount, catalogIsLoadingMore);
+  const status = resolveArtistCatalogStatus(hasMore, counts.loadedCount, counts.totalCount, catalogIsLoadingMore, pagingIncomplete);
 
   return (
     <dl className="details compact artist-catalog-counts" aria-label="Artist catalog scan counts">

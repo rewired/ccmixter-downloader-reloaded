@@ -27,4 +27,11 @@ describe('resolveArtistCatalogStatus', () => {
     expect(resolveArtistCatalogStatus(false, 0, undefined, false)).toBeNull();
     expect(resolveArtistCatalogStatus(true, 0, undefined, false)).toBeNull();
   });
+
+  it('never renders "All 240 uploads loaded" when paging stopped incomplete', () => {
+    const status = resolveArtistCatalogStatus(false, 240, 553, false, true);
+
+    expect(status).not.toContain('All 240 uploads loaded');
+    expect(status).toBe('Catalog incomplete: 240 of 553 loaded');
+  });
 });

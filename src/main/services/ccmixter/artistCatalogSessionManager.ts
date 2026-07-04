@@ -9,7 +9,7 @@ import {
 } from '../../../shared/domain';
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
-import { ARTIST_CATALOG_MAX_PAGES, describeArtistCatalogApiFailure } from './ccmixterApiClient';
+import { ARTIST_CATALOG_QUERY_LIMIT, describeArtistCatalogApiFailure } from './ccmixterApiClient';
 import type {
   CcmixterApiUploadMapping,
   CcmixterArtistCatalogPage,
@@ -23,6 +23,17 @@ const EVIDENCE_TAG_HINTS = new Set([
 ]);
 const EVIDENCE_FILENAME_PATTERN = /\b(stems?|sources?|pells?|acapp?ella|instrumental stems?|zip)\b/i;
 const MISSING_BPM_WARNING = 'BPM missing for one or more uploads.';
+// A duplicate-only or empty API page does not necessarily mean the catalog is exhausted: ccMixter's
+// offset paging can skip or repeat a window (e.g. due to concurrent uploads shifting the ordering).
+// When a known totalCount says more uploads remain, retry a bounded number of times by nudging the
+// offset forward before concluding the source is genuinely unable to make progress.
+const MAX_RECOVERY_ATTEMPTS = 3;
+// The single-shot resolver's ARTIST_CATALOG_MAX_PAGES (20 pages = 240 uploads at the current
+// per-page limit) is a fine safety cap for a one-shot resolve, but it silently truncated real
+// scroll-and-load catalogs (e.g. a 553-upload artist stopped dead at 240/553). A user-driven lazy
+// load session gets a much higher ceiling so it can actually reach large totalCounts; this remains
+// a hard stop only to guard against a runaway/broken pagination source, not an expected catalog size.
+const ARTIST_CATALOG_SESSION_MAX_PAGES = 500;
 
 interface InternalSession {
   sessionId: string;
@@ -39,6 +50,8 @@ interface InternalSession {
   pagingIncomplete: boolean;
   isLoadingMore: boolean;
   sessionWarnings: string[];
+  consecutiveDuplicatePages: number;
+  consecutiveEmptyPages: number;
 }
 
 export class ArtistCatalogSessionManager {
@@ -213,7 +226,9 @@ export class ArtistCatalogSessionManager {
         pageCount: 1,
         pagingIncomplete: false,
         isLoadingMore: false,
-        sessionWarnings
+        sessionWarnings,
+        consecutiveDuplicatePages: 0,
+        consecutiveEmptyPages: 0
       };
 
       this.sessions.set(sessionId, session);
@@ -250,7 +265,7 @@ export class ArtistCatalogSessionManager {
       };
     }
 
-    if (session.pageCount >= ARTIST_CATALOG_MAX_PAGES) {
+    if (session.pageCount >= ARTIST_CATALOG_SESSION_MAX_PAGES) {
       session.pagingIncomplete = true;
       session.hasMore = false;
       return {
@@ -265,41 +280,75 @@ export class ArtistCatalogSessionManager {
       let newMappings: CcmixterApiUploadMapping[] = [];
 
       if (session.sourceKind === 'api') {
-        const page = await this.apiClient.resolveByArtistLoginPage(session.artistLogin, session.nextOffset);
+        const outcome = await this.loadMoreFromApiWithRecovery(session);
+        newMappings = outcome.mappings;
 
-        if (page.mappings.length === 0) {
-          session.hasMore = false;
-          session.isLoadingMore = false;
-          return {
-            ok: true,
-            value: sessionToPageResult(session)
-          };
+        if (outcome.recoveryFailed) {
+          session.pagingIncomplete = true;
         }
-
-        newMappings = page.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
-        session.nextOffset += page.mappings.length;
       } else {
         if (!session.nextPageUrl || !this.htmlClient?.resolveArtistCatalogPage) {
-          session.hasMore = false;
-          session.isLoadingMore = false;
-          return {
-            ok: true,
-            value: sessionToPageResult(session)
-          };
+          if (isKnownIncomplete(session)) {
+            const outcome = await this.switchToApiAndRecover(session);
+            newMappings = outcome.mappings;
+            if (outcome.recoveryFailed) {
+              session.pagingIncomplete = true;
+            }
+          } else {
+            session.hasMore = false;
+            session.isLoadingMore = false;
+            return {
+              ok: true,
+              value: sessionToPageResult(session)
+            };
+          }
+        } else {
+          const htmlPage: CcmixterHtmlCatalogResult = await this.htmlClient.resolveArtistCatalogPage(
+            session.nextPageUrl,
+            session.artistLogin
+          );
+
+          newMappings = htmlPage.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
+
+          if (typeof htmlPage.totalCount === 'number') {
+            session.totalCount = htmlPage.totalCount;
+          }
+
+          session.nextPageUrl = htmlPage.nextPageUrls[0];
+
+          if (newMappings.length === 0) {
+            session.consecutiveDuplicatePages += 1;
+
+            if (!isKnownIncomplete(session)) {
+              session.hasMore = false;
+              session.isLoadingMore = false;
+              return {
+                ok: true,
+                value: sessionToPageResult(session)
+              };
+            }
+
+            if (session.consecutiveDuplicatePages > MAX_RECOVERY_ATTEMPTS) {
+              session.pagingIncomplete = true;
+              session.hasMore = false;
+              session.isLoadingMore = false;
+              return {
+                ok: true,
+                value: sessionToPageResult(session)
+              };
+            }
+            // Leave hasMore as-is so the next scroll-triggered load-more retries (either the same
+            // HTML next link again, or drops through to the API-switch branch above once the HTML
+            // link disappears) before giving up and marking the session incomplete.
+            session.isLoadingMore = false;
+            return {
+              ok: true,
+              value: sessionToPageResult(session)
+            };
+          } else {
+            session.consecutiveDuplicatePages = 0;
+          }
         }
-
-        const htmlPage: CcmixterHtmlCatalogResult = await this.htmlClient.resolveArtistCatalogPage(
-          session.nextPageUrl,
-          session.artistLogin
-        );
-
-        newMappings = htmlPage.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
-
-        if (typeof htmlPage.totalCount === 'number') {
-          session.totalCount = htmlPage.totalCount;
-        }
-
-        session.nextPageUrl = htmlPage.nextPageUrls[0];
       }
 
       if (newMappings.length === 0) {
@@ -339,6 +388,68 @@ export class ArtistCatalogSessionManager {
         error: error instanceof Error ? error.message : 'Catalog load-more failed.'
       };
     }
+  }
+
+  // Fetches API pages starting at session.nextOffset, retrying with an advanced offset (up to
+  // MAX_RECOVERY_ATTEMPTS times) when a page comes back empty or duplicate-only while a known
+  // totalCount says the catalog is not actually exhausted yet. Returns as soon as a page yields at
+  // least one unverified upload, or gives up and reports recoveryFailed once the retry budget runs out.
+  private async loadMoreFromApiWithRecovery(
+    session: InternalSession
+  ): Promise<{ mappings: CcmixterApiUploadMapping[]; recoveryFailed: boolean }> {
+    for (let attempt = 0; attempt <= MAX_RECOVERY_ATTEMPTS; attempt += 1) {
+      const page = await this.apiClient.resolveByArtistLoginPage(session.artistLogin, session.nextOffset);
+
+      if (page.mappings.length === 0) {
+        session.consecutiveEmptyPages += 1;
+        session.consecutiveDuplicatePages = 0;
+
+        if (!isKnownIncomplete(session)) {
+          return { mappings: [], recoveryFailed: false };
+        }
+
+        if (attempt >= MAX_RECOVERY_ATTEMPTS) {
+          return { mappings: [], recoveryFailed: true };
+        }
+
+        session.nextOffset += ARTIST_CATALOG_QUERY_LIMIT;
+        continue;
+      }
+
+      const unique = page.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
+      session.nextOffset += page.mappings.length;
+
+      if (unique.length > 0) {
+        session.consecutiveDuplicatePages = 0;
+        session.consecutiveEmptyPages = 0;
+        return { mappings: unique, recoveryFailed: false };
+      }
+
+      session.consecutiveDuplicatePages += 1;
+
+      if (!isKnownIncomplete(session)) {
+        return { mappings: [], recoveryFailed: false };
+      }
+
+      if (attempt >= MAX_RECOVERY_ATTEMPTS) {
+        return { mappings: [], recoveryFailed: true };
+      }
+      // Duplicate-only page but totalCount says more remain: retry at the advanced offset.
+    }
+
+    return { mappings: [], recoveryFailed: true };
+  }
+
+  // Used when HTML paging runs out of an immediate next link (or keeps repeating the same page)
+  // while a known totalCount says the catalog isn't actually done. ccMixter's API paging is now the
+  // reliable path (see net.request fix), so this switches the session over to API offset paging
+  // instead of concluding the catalog is complete just because the HTML source stalled.
+  private async switchToApiAndRecover(
+    session: InternalSession
+  ): Promise<{ mappings: CcmixterApiUploadMapping[]; recoveryFailed: boolean }> {
+    session.sourceKind = 'api';
+    session.nextOffset = session.seenUploadIds.size;
+    return this.loadMoreFromApiWithRecovery(session);
   }
 
   private mappingsToGroups(mappings: CcmixterApiUploadMapping[], artistLogin: string): StemGroup[] {
@@ -381,6 +492,10 @@ export class ArtistCatalogSessionManager {
       };
     });
   }
+}
+
+function isKnownIncomplete(session: InternalSession): boolean {
+  return typeof session.totalCount === 'number' && session.seenUploadIds.size < session.totalCount;
 }
 
 function hasExplicitSourceStemArchiveEvidence(group: StemGroup): boolean {
@@ -453,6 +568,7 @@ function sessionToPageResult(session: InternalSession): ArtistCatalogPageResult 
     loadedCount: session.seenUploadIds.size,
     totalCount: session.totalCount,
     hasMore: session.hasMore,
+    pagingIncomplete: session.pagingIncomplete,
     warnings: [
       ...(session.pagingIncomplete ? [ARTIST_SCAN_PAGINATION_WARNING] : [])
     ]
