@@ -149,6 +149,62 @@ describe('CcmixterResolver', () => {
     expect(metadata.warnings).not.toContain('BPM missing for one or more uploads.');
   });
 
+  it('falls back to artist-page HTML when an artist-link API catalog request fails', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/artist-catalog-page.html'), 'utf8');
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async () => {
+          throw new Error('fetch failed');
+        },
+        resolveByUploadId: async () => []
+      },
+      htmlClient: {
+        enrichUploadPage: async (sourceUrl) => parseCcmixterUploadHtml(html, sourceUrl),
+        resolveArtistCatalogPage: async (sourceUrl, artistLogin) => parseCcmixterArtistCatalogHtml(html, sourceUrl, artistLogin)
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('https://ccmixter.org/people/7OOP3D');
+
+    expect(metadata.status).not.toBe('unresolved');
+    expect(metadata.groups.length).toBeGreaterThanOrEqual(3);
+    expect(metadata.uploads.length).toBeGreaterThanOrEqual(3);
+    expect(metadata.uploads.map((upload) => upload.uploadId)).toEqual(['70001', '70002', '70003']);
+    expect(metadata.uploads.map((upload) => upload.bpm)).toEqual([121, 83, undefined]);
+    expect(metadata.warnings).toContain(
+      'ccMixter API artist catalog request failed for https://ccmixter.org/api/query?f=json&dataview=default&user=7OOP3D&limit=100&offset=0: fetch failed'
+    );
+    expect(metadata.warnings).toContain('HTML artist catalog fallback succeeded for https://ccmixter.org/people/7OOP3D with 3 upload(s).');
+    expect(metadata.warnings).not.toContain('fetch failed');
+    expect(metadata.warnings).not.toContain('BPM missing for one or more uploads.');
+  });
+
+  it('builds the artist-page HTML fallback URL from exact artist-name input when the API catalog request fails', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/artist-catalog-page.html'), 'utf8');
+    const fallbackUrls: string[] = [];
+    const resolver = new CcmixterResolver({
+      apiClient: {
+        resolveByArtistLogin: async () => {
+          throw new Error('fetch failed');
+        },
+        resolveByUploadId: async () => []
+      },
+      htmlClient: {
+        enrichUploadPage: async (sourceUrl) => parseCcmixterUploadHtml(html, sourceUrl),
+        resolveArtistCatalogPage: async (sourceUrl, artistLogin) => {
+          fallbackUrls.push(sourceUrl);
+          return parseCcmixterArtistCatalogHtml(html, sourceUrl, artistLogin);
+        }
+      }
+    });
+
+    const metadata = await resolver.resolveMetadata('7OOP3D');
+
+    expect(fallbackUrls).toEqual(['https://ccmixter.org/people/7OOP3D']);
+    expect(metadata.status).not.toBe('unresolved');
+    expect(metadata.uploads.length).toBeGreaterThanOrEqual(3);
+  });
+
   it('treats plain artist-name inputs as artist catalog scans', async () => {
     const artistCalls: string[] = [];
     const resolver = new CcmixterResolver({

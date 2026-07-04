@@ -21,16 +21,16 @@ export class CcmixterHtmlClient {
   }
 
   async enrichUploadPage(sourceUrl: string): Promise<CcmixterHtmlEnrichment> {
-    const html = await this.fetchHtml(sourceUrl);
+    const html = await this.fetchHtml(sourceUrl, 'ccMixter HTML upload page request');
     return parseCcmixterUploadHtml(html, sourceUrl);
   }
 
   async resolveArtistCatalogPage(sourceUrl: string, artistLogin: string): Promise<CcmixterHtmlCatalogResult> {
-    const html = await this.fetchHtml(sourceUrl);
+    const html = await this.fetchHtml(sourceUrl, 'ccMixter HTML artist catalog request');
     return parseCcmixterArtistCatalogHtml(html, sourceUrl, artistLogin);
   }
 
-  private async fetchHtml(sourceUrl: string): Promise<string> {
+  private async fetchHtml(sourceUrl: string, requestDescription: string): Promise<string> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -43,16 +43,16 @@ export class CcmixterHtmlClient {
       });
 
       if (!response.ok) {
-        throw new Error(`ccMixter upload page request failed with HTTP ${response.status}.`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       return response.text();
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`ccMixter upload page request timed out after ${this.timeoutMs} ms.`);
+        throw new Error(`${requestDescription} failed for ${sourceUrl}: request timed out after ${this.timeoutMs} ms.`);
       }
 
-      throw error;
+      throw new Error(`${requestDescription} failed for ${sourceUrl}: ${errorMessage(error)}`);
     } finally {
       clearTimeout(timeout);
     }
@@ -447,4 +447,8 @@ function resolveUrl(href: string, baseUrl = 'https://ccmixter.org'): string | un
   } catch {
     return undefined;
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown error';
 }

@@ -40,6 +40,14 @@ pnpm test:e2e
 
 The current Playwright Electron smoke uses one live ccMixter-hosted MP3 URL from `fixture:haze-smoke`, so network availability can affect `pnpm test:e2e`.
 
+Manual artist catalog runtime smoke:
+
+```powershell
+pnpm start
+```
+
+In the Electron app, enter `https://ccmixter.org/people/7OOP3D`, click `Review artist uploads`, and verify that the resolver status is not unresolved, the upload count is greater than 1, visible catalog rows appear, and diagnostics do not show a bare `fetch failed` warning.
+
 ## Current Slice Behavior
 
 The app lets a user choose a Stem Library Root Folder once, stores that setting through the Main process in Electron's user data area, resolves ccMixter metadata, creates a dry-run preview, lets the user review target names, and starts downloads only after explicit confirmation.

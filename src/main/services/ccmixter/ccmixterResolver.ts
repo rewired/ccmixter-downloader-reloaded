@@ -19,7 +19,7 @@ import {
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
 import { HAZE_SMOKE_FIXTURE_ID, HAZE_SMOKE_STEM_GROUPS } from '../../sample-data';
-import { CcmixterApiClient } from './ccmixterApiClient';
+import { ARTIST_CATALOG_QUERY_LIMIT, buildCcmixterQueryUrl, CcmixterApiClient } from './ccmixterApiClient';
 import { CcmixterHtmlClient } from './ccmixterHtmlClient';
 import type {
   CcmixterArtistCatalogResult,
@@ -55,6 +55,9 @@ const EVIDENCE_TAG_HINTS = new Set([
 ]);
 const EVIDENCE_FILENAME_PATTERN = /\b(stems?|sources?|pells?|acapp?ella|instrumental stems?|zip)\b/i;
 const MISSING_BPM_WARNING = 'BPM missing for one or more uploads.';
+type ResolveMappingsResult =
+  | { ok: true; mappings: CcmixterApiUploadMapping[]; pagingIncomplete: boolean; warnings: string[] }
+  | { ok: false; warning: string };
 
 export class CcmixterResolver {
   private readonly apiClient: CcmixterResolverDependencies['apiClient'];
@@ -83,7 +86,7 @@ export class CcmixterResolver {
     }
 
     if (mappingsResult.mappings.length === 0) {
-      return unresolvedMetadata(input, ['ccMixter API returned no matching uploads.'], createdAt);
+      return unresolvedMetadata(input, [...mappingsResult.warnings, noMappingsWarning(input)], createdAt);
     }
 
     const enrichments = options.enrichHtml === false || isArtistCatalogInput(input) ? [] : await this.enrichUploads(mappingsResult.mappings);
@@ -136,9 +139,7 @@ export class CcmixterResolver {
     });
   }
 
-  private async resolveApiMappings(
-    input: CcmixterInput
-  ): Promise<{ ok: true; mappings: CcmixterApiUploadMapping[]; pagingIncomplete: boolean; warnings: string[] } | { ok: false; warning: string }> {
+  private async resolveApiMappings(input: CcmixterInput): Promise<ResolveMappingsResult> {
     try {
       if (input.uploadId) {
         return {
@@ -174,21 +175,35 @@ export class CcmixterResolver {
   }
 
   private async resolveArtistCatalog(input: CcmixterInput, artistLogin: string): Promise<CcmixterArtistCatalogResult> {
-    const primaryResult = await this.apiClient.resolveByArtistLogin(artistLogin);
-    const normalizedLogin = input.normalizedArtistLogin;
-    const shouldTryNormalized =
-      primaryResult.mappings.length === 0 && normalizedLogin !== undefined && normalizedLogin !== artistLogin;
-    const apiResult = shouldTryNormalized ? await this.apiClient.resolveByArtistLogin(normalizedLogin) : primaryResult;
-    const warnings = [...primaryResult.warnings, ...(apiResult === primaryResult ? [] : apiResult.warnings)];
+    let apiResult: CcmixterArtistCatalogResult;
+    let warnings: string[];
 
-    if (input.kind !== 'artist-link' || !input.sourceUrl || apiResult.mappings.length > 1) {
+    try {
+      const primaryResult = await this.apiClient.resolveByArtistLogin(artistLogin);
+      const normalizedLogin = input.normalizedArtistLogin;
+      const shouldTryNormalized =
+        primaryResult.mappings.length === 0 && normalizedLogin !== undefined && normalizedLogin !== artistLogin;
+      apiResult = shouldTryNormalized ? await this.apiClient.resolveByArtistLogin(normalizedLogin) : primaryResult;
+      warnings = [...primaryResult.warnings, ...(apiResult === primaryResult ? [] : apiResult.warnings)];
+    } catch (error) {
+      apiResult = {
+        mappings: [],
+        pagingIncomplete: false,
+        warnings: []
+      };
+      warnings = [apiArtistCatalogFailureWarning(artistLogin, error)];
+    }
+
+    const htmlSourceUrl = resolveArtistCatalogHtmlFallbackUrl(input, input.artistLogin ?? artistLogin);
+
+    if (!htmlSourceUrl || apiResult.mappings.length > 1) {
       return {
         ...apiResult,
         warnings
       };
     }
 
-    const htmlCatalog = await this.resolveArtistCatalogFromHtml(input.sourceUrl, input.artistLogin ?? artistLogin);
+    const htmlCatalog = await this.resolveArtistCatalogFromHtml(htmlSourceUrl, input.artistLogin ?? artistLogin);
     if (!htmlCatalog) {
       return {
         ...apiResult,
@@ -199,7 +214,13 @@ export class CcmixterResolver {
     return {
       mappings: mergeMappingsByUploadId([...apiResult.mappings, ...htmlCatalog.mappings]),
       pagingIncomplete: apiResult.pagingIncomplete,
-      warnings: [...warnings, ...htmlCatalog.warnings]
+      warnings: [
+        ...warnings,
+        ...htmlCatalog.warnings,
+        ...(htmlCatalog.mappings.length > 0
+          ? [`HTML artist catalog fallback succeeded for ${htmlSourceUrl} with ${htmlCatalog.mappings.length} upload(s).`]
+          : [])
+      ]
     };
   }
 
@@ -479,6 +500,39 @@ function unresolvedMetadata(input: CcmixterInput, warnings: string[], createdAt:
     metadataSource: 'unresolved',
     createdAt
   };
+}
+
+function resolveArtistCatalogHtmlFallbackUrl(input: CcmixterInput, exactArtistLogin: string): string | null {
+  if (!isArtistCatalogInput(input)) {
+    return null;
+  }
+
+  if (input.sourceUrl) {
+    return input.sourceUrl;
+  }
+
+  return `https://ccmixter.org/people/${encodeURIComponent(exactArtistLogin)}`;
+}
+
+function apiArtistCatalogFailureWarning(artistLogin: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : 'unknown error';
+
+  if (message.startsWith('ccMixter API artist catalog request failed for ')) {
+    return message;
+  }
+
+  const url = buildCcmixterQueryUrl({
+    artistLogin,
+    dataview: 'default',
+    limit: ARTIST_CATALOG_QUERY_LIMIT,
+    offset: 0
+  });
+
+  return `ccMixter API artist catalog request failed for ${url.toString()}: ${message}`;
+}
+
+function noMappingsWarning(input: CcmixterInput): string {
+  return isArtistCatalogInput(input) ? 'ccMixter artist catalog scan returned no matching uploads.' : 'ccMixter API returned no matching uploads.';
 }
 
 function resolveFixtureMetadata(input: CcmixterInput, createdAt: string): ResolvedCcmixterMetadata {

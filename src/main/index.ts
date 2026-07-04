@@ -15,12 +15,21 @@ import {
 } from '../shared/domain';
 import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
 import { ArchiveInspectionService } from './services/archive/archiveInspectionService';
+import { CcmixterApiClient } from './services/ccmixter/ccmixterApiClient';
+import { CcmixterHtmlClient } from './services/ccmixter/ccmixterHtmlClient';
 import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
 import { DownloadManager } from './services/download/downloadManager';
 import { SettingsStore } from './settings';
 
 let settingsStore: SettingsStore;
-const ccmixterResolver = new CcmixterResolver();
+const electronFetch: typeof fetch = (input, init) => {
+  const resolvedInput = input instanceof URL ? input.toString() : input;
+  return net.fetch(resolvedInput as Parameters<typeof net.fetch>[0], init) as Promise<Response>;
+};
+const ccmixterResolver = new CcmixterResolver({
+  apiClient: new CcmixterApiClient({ fetchImpl: electronFetch }),
+  htmlClient: new CcmixterHtmlClient({ fetchImpl: electronFetch })
+});
 const archiveInspectionService = new ArchiveInspectionService();
 const downloadManager = new DownloadManager({
   fetcher: (url, options) => net.fetch(url, options),

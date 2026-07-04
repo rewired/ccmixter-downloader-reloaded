@@ -38,7 +38,7 @@ export class CcmixterApiClient {
         { artistLogin, dataview: 'default', limit: ARTIST_CATALOG_QUERY_LIMIT, offset },
         this.baseUrl
       );
-      const response = await this.fetchJson(url);
+      const response = await this.fetchJson(url, 'ccMixter API artist catalog request');
       const pageMappings = parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
 
       for (const mapping of pageMappings) {
@@ -65,11 +65,11 @@ export class CcmixterApiClient {
 
   async resolveByUploadId(uploadId: string): Promise<CcmixterApiUploadMapping[]> {
     const url = buildCcmixterQueryUrl({ uploadId, dataview: 'info', limit: 1 }, this.baseUrl);
-    const response = await this.fetchJson(url);
+    const response = await this.fetchJson(url, 'ccMixter API upload lookup request');
     return parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
   }
 
-  private async fetchJson(url: URL): Promise<unknown> {
+  private async fetchJson(url: URL, requestDescription: string): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -82,16 +82,16 @@ export class CcmixterApiClient {
       });
 
       if (!response.ok) {
-        throw new Error(`ccMixter API request failed with HTTP ${response.status}.`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       return response.json() as Promise<unknown>;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`ccMixter API request timed out after ${this.timeoutMs} ms.`);
+        throw new Error(`${requestDescription} failed for ${url.toString()}: request timed out after ${this.timeoutMs} ms.`);
       }
 
-      throw error;
+      throw new Error(`${requestDescription} failed for ${url.toString()}: ${errorMessage(error)}`);
     } finally {
       clearTimeout(timeout);
     }
@@ -432,4 +432,8 @@ function hasAnyKey(record: RawCcmixterApiUpload, keys: string[]): boolean {
 
 function isRecord(value: unknown): value is RawCcmixterApiUpload {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown error';
 }
