@@ -24,12 +24,99 @@ import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
 import { DownloadManager } from './services/download/downloadManager';
 import { SettingsStore } from './settings';
 
+// Electron's net.fetch can surface certain lower-level networking failures (e.g. a legacy
+// server sending a malformed response header) as an uncaught EventEmitter 'error' rather than
+// a rejected fetch() promise, which bypasses our own try/catch in the ccMixter clients entirely.
+// Log and keep the app alive instead of letting it crash with a blocking native dialog.
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception in main process:', error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection in main process:', reason);
+});
+
 let settingsStore: SettingsStore;
 const electronFetch: typeof fetch = (input, init) => {
   const resolvedInput = input instanceof URL ? input.toString() : input;
   return net.fetch(resolvedInput as Parameters<typeof net.fetch>[0], init) as Promise<Response>;
 };
-const apiClient = new CcmixterApiClient({ fetchImpl: electronFetch });
+
+// ccMixter's JSON query API echoes its entire (potentially large) response payload into a single
+// "X-JSON" response header, in addition to the body. Electron's net.fetch bridges response headers
+// through undici's strict WHATWG Headers implementation, which throws (as an uncaught exception,
+// not a rejected promise — see the process-level handlers above) when a header value contains a
+// non-Latin1 character, which is common in real upload titles/tags. net.request exposes response
+// headers as plain Node-style values with no such validation, sidestepping the crash entirely, so
+// the JSON API client uses it instead of net.fetch.
+const electronJsonFetch: typeof fetch = (input, init) => {
+  const url = input instanceof URL ? input.toString() : String(input);
+
+  return new Promise((resolve, reject) => {
+    const request = net.request({ method: init?.method ?? 'GET', url });
+
+    for (const [name, value] of headerEntries(init?.headers)) {
+      request.setHeader(name, value);
+    }
+
+    const signal = init?.signal;
+    const onAbort = (): void => request.abort();
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    request.on('response', (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(
+          new Response(Buffer.concat(chunks), {
+            status: response.statusCode,
+            statusText: response.statusMessage
+          })
+        );
+      });
+      response.on('error', (error) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+
+    request.on('error', (error) => {
+      signal?.removeEventListener('abort', onAbort);
+      if (signal?.aborted) {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      } else {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+
+    request.end();
+  });
+};
+
+function headerEntries(headers: HeadersInit | undefined): Array<[string, string]> {
+  if (!headers) {
+    return [];
+  }
+
+  if (headers instanceof Headers) {
+    return [...headers.entries()];
+  }
+
+  if (Array.isArray(headers)) {
+    return headers;
+  }
+
+  return Object.entries(headers);
+}
+
+const apiClient = new CcmixterApiClient({ fetchImpl: electronJsonFetch });
 const htmlClient = new CcmixterHtmlClient({ fetchImpl: electronFetch });
 const ccmixterResolver = new CcmixterResolver({
   apiClient,

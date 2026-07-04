@@ -264,10 +264,11 @@ export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: Stem
         };
       })
   );
+  // Per-group/per-file warnings (missing files, no stem evidence, sanitized overrides, etc.) are
+  // surfaced on each card via ReviewGroupList/GroupList; they must not be duplicated into this
+  // plan-level list, which is reserved for session/plan-wide facts shown once in the global footer.
   const warnings = mergeWarnings(session.sourcePlan.warnings, [
     ...session.warnings,
-    ...session.groups.flatMap((group) => [...group.warnings, ...group.overrideWarnings]),
-    ...session.groups.flatMap((group) => group.files.flatMap((file) => file.overrideWarnings)),
     plannedFiles.length === 0 ? 'No files are included in the reviewed dry-run plan.' : undefined
   ]);
 

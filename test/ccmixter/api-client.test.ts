@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING } from '../../src/shared/domain';
 import {
   ARTIST_CATALOG_MAX_PAGES,
+  ARTIST_CATALOG_QUERY_LIMIT,
   buildCcmixterQueryUrl,
   CcmixterApiClient,
   mapRawApiUpload,
@@ -84,9 +85,9 @@ describe('CcmixterApiClient mapping', () => {
         const offset = Number(url.searchParams.get('offset') ?? '0');
         const page =
           offset === 0
-            ? Array.from({ length: 100 }, (_value, index) => ({
-                upload_id: index === 99 ? 1 : index + 1,
-                upload_name: index === 99 ? 'One Duplicate' : `Upload ${index + 1}`,
+            ? Array.from({ length: ARTIST_CATALOG_QUERY_LIMIT }, (_value, index) => ({
+                upload_id: index === ARTIST_CATALOG_QUERY_LIMIT - 1 ? 1 : index + 1,
+                upload_name: index === ARTIST_CATALOG_QUERY_LIMIT - 1 ? 'One Duplicate' : `Upload ${index + 1}`,
                 user_name: 'WiseMan',
                 user_real_name: 'Wiseman',
                 upload_tags: 'audio'
@@ -105,19 +106,19 @@ describe('CcmixterApiClient mapping', () => {
     expect(requestedUrls[0]).toContain('dataview=default');
     expect(requestedUrls[0]).toContain('user=WiseMan');
     expect(requestedUrls[0]).toContain('offset=0');
-    expect(requestedUrls[1]).toContain('offset=100');
+    expect(requestedUrls[1]).toContain(`offset=${ARTIST_CATALOG_QUERY_LIMIT}`);
   });
 
   it('reports incomplete paging when artist catalog reaches the max page guard', async () => {
     let requestCount = 0;
     const client = new CcmixterApiClient({
       fetchImpl: async () => {
-        const pageBase = requestCount * 100;
+        const pageBase = requestCount * ARTIST_CATALOG_QUERY_LIMIT;
         requestCount += 1;
 
         return new Response(
           JSON.stringify(
-            Array.from({ length: 100 }, (_value, index) => ({
+            Array.from({ length: ARTIST_CATALOG_QUERY_LIMIT }, (_value, index) => ({
               upload_id: pageBase + index,
               upload_name: `Upload ${pageBase + index}`,
               user_name: 'WiseMan',

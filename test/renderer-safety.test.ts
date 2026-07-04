@@ -43,6 +43,8 @@ describe('renderer safety', () => {
     expect(source).toContain('Included files');
     expect(source).toContain('Loading more uploads');
     expect(source).toContain('uploads loaded');
+    expect(source).toContain('More uploads available');
+    expect(source).toContain('resolveArtistCatalogStatus');
     expect(source).toContain('resolveArtistCatalogCounts');
     expect(source).toContain('isArtistCatalogInput');
     expect(source).toContain('Include recommended source/stem/archive files');

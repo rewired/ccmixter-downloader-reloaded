@@ -15,7 +15,15 @@ import type {
 
 const DEFAULT_QUERY_API_URL = 'https://ccmixter.org/api/query';
 const DEFAULT_TIMEOUT_MS = 10_000;
-export const ARTIST_CATALOG_QUERY_LIMIT = 100;
+// ccMixter's query API echoes the entire JSON payload into a single "X-JSON" response header
+// (in addition to the body), which can make Electron's net.fetch hang well past a normal
+// response time for multi-record queries. The HTML catalog fallback is fast and reliable, so
+// this call gets a much shorter timeout to fail over to it quickly instead of making the user
+// wait out the full default timeout on every catalog scan.
+const ARTIST_CATALOG_API_TIMEOUT_MS = 4_000;
+// ccMixter's own artist-page HTML paginates in chunks of 12; matching that size here keeps
+// the JSON API request small enough to avoid net::ERR_RESPONSE_HEADERS_TOO_BIG on large catalogs.
+export const ARTIST_CATALOG_QUERY_LIMIT = 12;
 export const ARTIST_CATALOG_MAX_PAGES = 20;
 
 export class CcmixterApiClient {
@@ -64,7 +72,7 @@ export class CcmixterApiClient {
       { artistLogin, dataview: 'default', limit: ARTIST_CATALOG_QUERY_LIMIT, offset },
       this.baseUrl
     );
-    const response = await this.fetchJson(url, 'ccMixter API artist catalog request');
+    const response = await this.fetchJson(url, 'ccMixter API artist catalog request', ARTIST_CATALOG_API_TIMEOUT_MS);
     const pageMappings = parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
 
     return {
@@ -79,15 +87,17 @@ export class CcmixterApiClient {
     return parseCcmixterApiResponse(response).map((upload) => mapRawApiUpload(upload));
   }
 
-  private async fetchJson(url: URL, requestDescription: string): Promise<unknown> {
+  private async fetchJson(url: URL, requestDescription: string, timeoutMsOverride?: number): Promise<unknown> {
+    const timeoutMs = timeoutMsOverride ?? this.timeoutMs;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await this.fetchImpl(url, {
         headers: {
           accept: 'application/json'
         },
+        credentials: 'omit',
         signal: controller.signal
       });
 
@@ -98,7 +108,7 @@ export class CcmixterApiClient {
       return response.json() as Promise<unknown>;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`${requestDescription} failed for ${url.toString()}: request timed out after ${this.timeoutMs} ms.`);
+        throw new Error(`${requestDescription} failed for ${url.toString()}: request timed out after ${timeoutMs} ms.`);
       }
 
       throw new Error(`${requestDescription} failed for ${url.toString()}: ${errorMessage(error)}`);
@@ -446,4 +456,21 @@ function isRecord(value: unknown): value is RawCcmixterApiUpload {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
+}
+
+export function describeArtistCatalogApiFailure(artistLogin: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : 'unknown error';
+
+  if (message.startsWith('ccMixter API artist catalog request failed for ')) {
+    return message;
+  }
+
+  const url = buildCcmixterQueryUrl({
+    artistLogin,
+    dataview: 'default',
+    limit: ARTIST_CATALOG_QUERY_LIMIT,
+    offset: 0
+  });
+
+  return `ccMixter API artist catalog request failed for ${url.toString()}: ${message}`;
 }

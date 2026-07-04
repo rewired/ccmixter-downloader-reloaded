@@ -19,7 +19,7 @@ import {
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
 import { HAZE_SMOKE_FIXTURE_ID, HAZE_SMOKE_STEM_GROUPS } from '../../sample-data';
-import { ARTIST_CATALOG_QUERY_LIMIT, buildCcmixterQueryUrl, CcmixterApiClient } from './ccmixterApiClient';
+import { CcmixterApiClient, describeArtistCatalogApiFailure } from './ccmixterApiClient';
 import { CcmixterHtmlClient } from './ccmixterHtmlClient';
 import type {
   CcmixterArtistCatalogResult,
@@ -175,6 +175,15 @@ export class CcmixterResolver {
   }
 
   private async resolveArtistCatalog(input: CcmixterInput, artistLogin: string): Promise<CcmixterArtistCatalogResult> {
+    const htmlSourceUrl = resolveArtistCatalogHtmlFallbackUrl(input, input.artistLogin ?? artistLogin);
+
+    // Start the HTML fallback fetch concurrently with the API call instead of only after the API
+    // fails or proves insufficient. ccMixter's catalog API can hang for several seconds while the
+    // HTML catalog page is typically fast, so racing them means we only pay the slower of the two
+    // costs, not both in sequence. resolveArtistCatalogFromHtml already catches its own errors, so
+    // this promise never rejects.
+    const htmlPromise = htmlSourceUrl ? this.resolveArtistCatalogFromHtml(htmlSourceUrl, input.artistLogin ?? artistLogin) : null;
+
     let apiResult: CcmixterArtistCatalogResult;
     let warnings: string[];
 
@@ -191,10 +200,8 @@ export class CcmixterResolver {
         pagingIncomplete: false,
         warnings: []
       };
-      warnings = [apiArtistCatalogFailureWarning(artistLogin, error)];
+      warnings = [describeArtistCatalogApiFailure(artistLogin, error)];
     }
-
-    const htmlSourceUrl = resolveArtistCatalogHtmlFallbackUrl(input, input.artistLogin ?? artistLogin);
 
     if (!htmlSourceUrl || apiResult.mappings.length > 1) {
       return {
@@ -203,7 +210,7 @@ export class CcmixterResolver {
       };
     }
 
-    const htmlCatalog = await this.resolveArtistCatalogFromHtml(htmlSourceUrl, input.artistLogin ?? artistLogin);
+    const htmlCatalog = htmlPromise ? await htmlPromise : null;
     if (!htmlCatalog) {
       return {
         ...apiResult,
@@ -512,23 +519,6 @@ function resolveArtistCatalogHtmlFallbackUrl(input: CcmixterInput, exactArtistLo
   }
 
   return `https://ccmixter.org/people/${encodeURIComponent(exactArtistLogin)}`;
-}
-
-function apiArtistCatalogFailureWarning(artistLogin: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : 'unknown error';
-
-  if (message.startsWith('ccMixter API artist catalog request failed for ')) {
-    return message;
-  }
-
-  const url = buildCcmixterQueryUrl({
-    artistLogin,
-    dataview: 'default',
-    limit: ARTIST_CATALOG_QUERY_LIMIT,
-    offset: 0
-  });
-
-  return `ccMixter API artist catalog request failed for ${url.toString()}: ${message}`;
 }
 
 function noMappingsWarning(input: CcmixterInput): string {

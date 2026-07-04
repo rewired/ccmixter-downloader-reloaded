@@ -9,10 +9,11 @@ import {
 } from '../../../shared/domain';
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
-import { ARTIST_CATALOG_MAX_PAGES } from './ccmixterApiClient';
+import { ARTIST_CATALOG_MAX_PAGES, describeArtistCatalogApiFailure } from './ccmixterApiClient';
 import type {
   CcmixterApiUploadMapping,
-  CcmixterArtistCatalogPage
+  CcmixterArtistCatalogPage,
+  CcmixterHtmlCatalogResult
 } from './ccmixterTypes';
 
 const EVIDENCE_TAG_HINTS = new Set([
@@ -37,6 +38,7 @@ interface InternalSession {
   pageCount: number;
   pagingIncomplete: boolean;
   isLoadingMore: boolean;
+  sessionWarnings: string[];
 }
 
 export class ArtistCatalogSessionManager {
@@ -80,63 +82,138 @@ export class ArtistCatalogSessionManager {
     const sessionId = `catalog-${artistLogin}-${Date.now()}`;
 
     try {
-      let firstPage = await this.apiClient.resolveByArtistLoginPage(artistLogin, 0);
+      const guessedSourceUrl = sourceUrl ?? `https://ccmixter.org/people/${encodeURIComponent(artistLogin)}`;
+
+      // Kick off the HTML fallback fetch and the API call at the same time instead of trying the
+      // API first and only falling back to HTML once it fails or times out. ccMixter's catalog API
+      // can hang for several seconds while the HTML catalog page is typically fast — racing them
+      // means a fast HTML response lets the session start immediately without ever waiting out the
+      // API's timeout, instead of always paying both costs one after another.
+      type ApiOutcome = { ok: true; page: CcmixterArtistCatalogPage } | { ok: false; error: unknown };
+
+      const apiPromise: Promise<ApiOutcome> = this.apiClient
+        .resolveByArtistLoginPage(artistLogin, 0)
+        .then((page): ApiOutcome => ({ ok: true, page }), (error): ApiOutcome => ({ ok: false, error }));
+
+      let htmlPromise: Promise<CcmixterHtmlCatalogResult | undefined> | undefined = this.htmlClient?.resolveArtistCatalogPage
+        ? this.htmlClient.resolveArtistCatalogPage(guessedSourceUrl, artistLogin).catch(() => undefined)
+        : undefined;
+
       let effectiveLogin = artistLogin;
-
-      if (firstPage.mappings.length === 0 && normalizedArtistLogin && normalizedArtistLogin !== artistLogin) {
-        firstPage = await this.apiClient.resolveByArtistLoginPage(normalizedArtistLogin, 0);
-        effectiveLogin = normalizedArtistLogin;
-      }
-
-      const effectiveSourceUrl = sourceUrl ?? `https://ccmixter.org/people/${encodeURIComponent(effectiveLogin)}`;
+      let firstPage: CcmixterArtistCatalogPage = { mappings: [], warnings: [] };
+      let apiFailureWarning: string | undefined;
+      let apiSucceeded = false;
+      let apiOutcomeKnown = false;
       let totalCount: number | undefined;
       let htmlUsed = false;
+      let sourceKind: 'api' | 'html' = 'api';
+      let nextPageUrl: string | undefined;
+      const sessionWarnings: string[] = [];
 
-      if (firstPage.mappings.length <= 1 && this.htmlClient?.resolveArtistCatalogPage) {
-        try {
-          const htmlResult = await this.htmlClient.resolveArtistCatalogPage(effectiveSourceUrl, effectiveLogin);
-          if (htmlResult.mappings.length > 0) {
-            const merged = mergeMappingsByUploadId([...firstPage.mappings, ...htmlResult.mappings]);
-            firstPage = { mappings: merged, warnings: firstPage.warnings };
-            totalCount = htmlResult.totalCount;
-            htmlUsed = true;
+      if (htmlPromise) {
+        const winner = await Promise.race([
+          apiPromise.then((outcome) => ({ from: 'api' as const, outcome })),
+          htmlPromise.then((result) => ({ from: 'html' as const, result }))
+        ]);
+
+        if (winner.from === 'html' && winner.result && winner.result.mappings.length > 0) {
+          firstPage = { mappings: winner.result.mappings, warnings: [] };
+          totalCount = winner.result.totalCount;
+          nextPageUrl = winner.result.nextPageUrls[0];
+          htmlUsed = true;
+          sourceKind = 'html';
+          sessionWarnings.push(
+            `HTML artist catalog fallback succeeded for ${guessedSourceUrl} with ${winner.result.mappings.length} upload(s).`
+          );
+        } else if (winner.from === 'api') {
+          apiOutcomeKnown = true;
+          if (winner.outcome.ok) {
+            apiSucceeded = true;
+            firstPage = winner.outcome.page;
+          } else {
+            apiFailureWarning = describeArtistCatalogApiFailure(artistLogin, winner.outcome.error);
           }
-        } catch {
+        }
+        // Otherwise HTML won the race but had no usable data (yet) — fall through below and
+        // resolve the API outcome (already in flight) the normal way.
+      }
+
+      if (!htmlUsed && !apiOutcomeKnown) {
+        const apiOutcome = await apiPromise;
+        if (apiOutcome.ok) {
+          apiSucceeded = true;
+          firstPage = apiOutcome.page;
+        } else {
+          apiFailureWarning = describeArtistCatalogApiFailure(artistLogin, apiOutcome.error);
         }
       }
 
-      if (firstPage.mappings.length === 0) {
-        return { ok: false, error: 'Artist catalog returned no uploads.' };
+      if (!htmlUsed && apiSucceeded && firstPage.mappings.length === 0 && normalizedArtistLogin && normalizedArtistLogin !== artistLogin) {
+        try {
+          firstPage = await this.apiClient.resolveByArtistLoginPage(normalizedArtistLogin, 0);
+          effectiveLogin = normalizedArtistLogin;
+        } catch (error) {
+          apiFailureWarning = describeArtistCatalogApiFailure(artistLogin, error);
+        }
       }
 
-      if (typeof totalCount === 'undefined' && !htmlUsed) {
-        try {
-          const infoPage = await this.htmlClient?.resolveArtistCatalogPage(effectiveSourceUrl, effectiveLogin);
-          if (infoPage) {
-            totalCount = infoPage.totalCount;
-          }
-        } catch {
+      const effectiveSourceUrl = sourceUrl ?? `https://ccmixter.org/people/${encodeURIComponent(effectiveLogin)}`;
+
+      // The normalized-login retry above can change which artist/URL we actually need; if so, the
+      // speculative HTML fetch (started for the original login) is no longer valid and must be redone.
+      if (!htmlUsed && effectiveSourceUrl !== guessedSourceUrl && this.htmlClient?.resolveArtistCatalogPage) {
+        htmlPromise = this.htmlClient.resolveArtistCatalogPage(effectiveSourceUrl, effectiveLogin).catch(() => undefined);
+      }
+
+      if (!htmlUsed && (!apiSucceeded || firstPage.mappings.length <= 1) && htmlPromise) {
+        const htmlResult = await htmlPromise;
+        if (htmlResult && htmlResult.mappings.length > 0) {
+          const merged = mergeMappingsByUploadId([...firstPage.mappings, ...htmlResult.mappings]);
+          firstPage = { mappings: merged, warnings: firstPage.warnings };
+          totalCount = htmlResult.totalCount;
+          nextPageUrl = htmlResult.nextPageUrls[0];
+          htmlUsed = true;
+          sourceKind = 'html';
+          sessionWarnings.push(
+            `HTML artist catalog fallback succeeded for ${effectiveSourceUrl} with ${htmlResult.mappings.length} upload(s).`
+          );
+        }
+      }
+
+      if (apiFailureWarning) {
+        sessionWarnings.unshift(apiFailureWarning);
+      }
+
+      if (firstPage.mappings.length === 0) {
+        return { ok: false, error: apiFailureWarning ?? 'Artist catalog returned no uploads.' };
+      }
+
+      if (typeof totalCount === 'undefined' && !htmlUsed && htmlPromise) {
+        const infoPage = await htmlPromise;
+        if (infoPage) {
+          totalCount = infoPage.totalCount;
         }
       }
 
       const seenUploadIds = new Set(firstPage.mappings.map((m) => m.upload.uploadId));
       const groups = this.mappingsToGroups(firstPage.mappings, effectiveLogin);
-      const hasMoreApi = firstPage.mappings.length > 0;
-      const hasMore = hasMoreApi && (typeof totalCount !== 'number' || seenUploadIds.size < totalCount);
+      const hasMore = computeHasMore(seenUploadIds.size, totalCount, sourceKind, nextPageUrl, firstPage.mappings.length > 0);
 
       const session: InternalSession = {
         sessionId,
         artistLogin: effectiveLogin,
         sourceUrl: effectiveSourceUrl,
-        sourceKind: 'api',
+        sourceKind,
         nextOffset: firstPage.mappings.length,
+        nextPageUrl,
         seenUploadIds,
         loadedGroups: groups,
         totalCount,
         hasMore,
         pageCount: 1,
         pagingIncomplete: false,
-        isLoadingMore: false
+        isLoadingMore: false,
+        sessionWarnings
       };
 
       this.sessions.set(sessionId, session);
@@ -192,6 +269,7 @@ export class ArtistCatalogSessionManager {
 
         if (page.mappings.length === 0) {
           session.hasMore = false;
+          session.isLoadingMore = false;
           return {
             ok: true,
             value: sessionToPageResult(session)
@@ -199,20 +277,34 @@ export class ArtistCatalogSessionManager {
         }
 
         newMappings = page.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
-
-        if (newMappings.length === 0) {
+        session.nextOffset += page.mappings.length;
+      } else {
+        if (!session.nextPageUrl || !this.htmlClient?.resolveArtistCatalogPage) {
           session.hasMore = false;
+          session.isLoadingMore = false;
           return {
             ok: true,
             value: sessionToPageResult(session)
           };
         }
 
-        session.nextOffset += page.mappings.length;
+        const htmlPage: CcmixterHtmlCatalogResult = await this.htmlClient.resolveArtistCatalogPage(
+          session.nextPageUrl,
+          session.artistLogin
+        );
+
+        newMappings = htmlPage.mappings.filter((m) => !session.seenUploadIds.has(m.upload.uploadId));
+
+        if (typeof htmlPage.totalCount === 'number') {
+          session.totalCount = htmlPage.totalCount;
+        }
+
+        session.nextPageUrl = htmlPage.nextPageUrls[0];
       }
 
       if (newMappings.length === 0) {
         session.hasMore = false;
+        session.isLoadingMore = false;
         return {
           ok: true,
           value: sessionToPageResult(session)
@@ -226,10 +318,13 @@ export class ArtistCatalogSessionManager {
       const newGroups = this.mappingsToGroups(newMappings, session.artistLogin);
       session.loadedGroups = [...session.loadedGroups, ...newGroups];
       session.pageCount += 1;
-
-      if (typeof session.totalCount === 'number' && session.seenUploadIds.size >= session.totalCount) {
-        session.hasMore = false;
-      }
+      session.hasMore = computeHasMore(
+        session.seenUploadIds.size,
+        session.totalCount,
+        session.sourceKind,
+        session.nextPageUrl,
+        true
+      );
 
       session.isLoadingMore = false;
 
@@ -298,6 +393,28 @@ function hasExplicitSourceStemArchiveEvidence(group: StemGroup): boolean {
   );
 }
 
+function computeHasMore(
+  loadedCount: number,
+  totalCount: number | undefined,
+  sourceKind: 'api' | 'html',
+  nextPageUrl: string | undefined,
+  hasAnyMappings: boolean
+): boolean {
+  if (!hasAnyMappings) {
+    return false;
+  }
+
+  if (typeof totalCount === 'number') {
+    return loadedCount < totalCount;
+  }
+
+  if (sourceKind === 'html') {
+    return Boolean(nextPageUrl);
+  }
+
+  return true;
+}
+
 function mergeMappingsByUploadId(mappings: CcmixterApiUploadMapping[]): CcmixterApiUploadMapping[] {
   const byUploadId = new Map<string, CcmixterApiUploadMapping>();
   for (const mapping of mappings) {
@@ -323,6 +440,7 @@ function sessionToState(session: InternalSession): ArtistCatalogState {
     pagingIncomplete: session.pagingIncomplete,
     warnings: [
       ARTIST_SCAN_REALITY_CHECK_WARNING,
+      ...session.sessionWarnings,
       ...(session.pagingIncomplete ? [ARTIST_SCAN_PAGINATION_WARNING] : [])
     ]
   };

@@ -671,6 +671,27 @@ function resolveArtistCatalogCounts(
   return null;
 }
 
+export function resolveArtistCatalogStatus(
+  hasMore: boolean,
+  loadedCount: number,
+  totalCount: number | undefined,
+  catalogIsLoadingMore: boolean
+): string | null {
+  if (catalogIsLoadingMore) {
+    return 'Loading more uploads…';
+  }
+
+  if (hasMore) {
+    return loadedCount > 0 ? 'More uploads available' : null;
+  }
+
+  if (loadedCount > 0) {
+    return `All ${typeof totalCount === 'number' ? totalCount : loadedCount} uploads loaded`;
+  }
+
+  return null;
+}
+
 function ArtistCatalogCounts({
   counts,
   catalogIsLoadingMore,
@@ -680,6 +701,8 @@ function ArtistCatalogCounts({
   catalogIsLoadingMore: boolean;
   hasMore: boolean;
 }): JSX.Element {
+  const status = resolveArtistCatalogStatus(hasMore, counts.loadedCount, counts.totalCount, catalogIsLoadingMore);
+
   return (
     <dl className="details compact artist-catalog-counts" aria-label="Artist catalog scan counts">
       <div>
@@ -705,8 +728,7 @@ function ArtistCatalogCounts({
         <dt>Included files</dt>
         <dd>{counts.includedFileCount}</dd>
       </div>
-      {catalogIsLoadingMore ? <div><dt>Status</dt><dd>Loading more uploads…</dd></div> : null}
-      {!hasMore && counts.loadedCount > 0 ? <div><dt>Status</dt><dd>All {typeof counts.totalCount === 'number' ? counts.totalCount : counts.loadedCount} uploads loaded</dd></div> : null}
+      {status ? <div><dt>Status</dt><dd>{status}</dd></div> : null}
     </dl>
   );
 }

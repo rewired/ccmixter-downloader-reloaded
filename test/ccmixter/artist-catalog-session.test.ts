@@ -30,6 +30,14 @@ function makePage(ids: string[]): { mappings: CcmixterApiUploadMapping[]; warnin
   };
 }
 
+function delay<T>(value: T, ms: number): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+function delayReject(error: Error, ms: number): Promise<never> {
+  return new Promise((_resolve, reject) => setTimeout(() => reject(error), ms));
+}
+
 describe('ArtistCatalogSessionManager', () => {
   it('returns first chunk with totalCount 96 from HTML info', async () => {
     const apiPage = vi.fn().mockResolvedValue(makePage(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']));
@@ -222,6 +230,131 @@ describe('ArtistCatalogSessionManager', () => {
 
     const result = await manager.loadMore('nonexistent-session');
     expect(result.ok).toBe(false);
+  });
+
+  it('falls back to HTML with totalCount and nextPageUrl when the API throws ERR_RESPONSE_HEADERS_TOO_BIG', async () => {
+    const apiPage = vi.fn().mockRejectedValue(new Error('ccMixter API artist catalog request failed for https://ccmixter.org/api/query?f=json&dataview=default&user=7OOP3D&limit=12&offset=0: net::ERR_RESPONSE_HEADERS_TOO_BIG'));
+    const htmlPage = vi.fn().mockResolvedValue({
+      mappings: makePage(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']).mappings,
+      nextPageUrls: ['https://ccmixter.org/people/7OOP3D?offset=12'],
+      totalCount: 96,
+      warnings: []
+    });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: { resolveArtistCatalogPage: htmlPage }
+    });
+
+    const start = await manager.startSession('7OOP3D', 'https://ccmixter.org/people/7OOP3D');
+
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+
+    expect(start.value.loadedCount).toBe(12);
+    expect(start.value.totalCount).toBe(96);
+    expect(start.value.hasMore).toBe(true);
+    expect(start.value.warnings.some((warning) => warning.includes('net::ERR_RESPONSE_HEADERS_TOO_BIG'))).toBe(true);
+    expect(start.value.warnings.some((warning) => warning.includes('HTML artist catalog fallback succeeded'))).toBe(true);
+
+    // Subsequent paging must go through the HTML client, not the (already-failing) API client.
+    const more = await manager.loadMore(start.value.sessionId);
+    expect(more.ok).toBe(true);
+    expect(apiPage).toHaveBeenCalledTimes(1);
+    expect(htmlPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('races the API and HTML fallback so a fast HTML response wins without waiting for a slow API', async () => {
+    const apiPage = vi.fn().mockImplementation(() => delayReject(new Error('net::ERR_RESPONSE_HEADERS_TOO_BIG'), 300));
+    const htmlPage = vi.fn().mockImplementation(() =>
+      delay(
+        {
+          mappings: makePage(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']).mappings,
+          nextPageUrls: ['https://ccmixter.org/people/7OOP3D?offset=12'],
+          totalCount: 96,
+          warnings: []
+        },
+        10
+      )
+    );
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: { resolveArtistCatalogPage: htmlPage }
+    });
+
+    const startedAt = Date.now();
+    const start = await manager.startSession('7OOP3D', 'https://ccmixter.org/people/7OOP3D');
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+
+    expect(start.value.loadedCount).toBe(12);
+    expect(start.value.totalCount).toBe(96);
+    expect(start.value.hasMore).toBe(true);
+    // The session must resolve well before the slow API call's 300ms delay elapses, proving the
+    // HTML response actually won the race instead of the API being awaited first.
+    expect(elapsedMs).toBeLessThan(150);
+  });
+
+  it('paginates an HTML-sourced session through multiple pages via nextPageUrl, deduping overlaps', async () => {
+    const htmlPage = vi.fn()
+      .mockResolvedValueOnce({
+        mappings: makePage(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']).mappings,
+        nextPageUrls: ['https://ccmixter.org/people/testArtist?offset=12'],
+        totalCount: 25,
+        warnings: []
+      })
+      .mockResolvedValueOnce({
+        // Overlapping page: repeats upload '12' before introducing 13-24.
+        mappings: makePage(['12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24']).mappings,
+        nextPageUrls: ['https://ccmixter.org/people/testArtist?offset=24'],
+        totalCount: 25,
+        warnings: []
+      })
+      .mockResolvedValueOnce({
+        mappings: makePage(['25']).mappings,
+        nextPageUrls: [],
+        totalCount: 25,
+        warnings: []
+      });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: vi.fn().mockRejectedValue(new Error('net::ERR_RESPONSE_HEADERS_TOO_BIG')),
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: { resolveArtistCatalogPage: htmlPage }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    expect(start.value.loadedCount).toBe(12);
+    expect(start.value.totalCount).toBe(25);
+    expect(start.value.hasMore).toBe(true);
+
+    const more1 = await manager.loadMore(start.value.sessionId);
+    expect(more1.ok).toBe(true);
+    if (!more1.ok) return;
+    expect(more1.value.loadedCount).toBe(24);
+    expect(more1.value.hasMore).toBe(true);
+
+    const more2 = await manager.loadMore(start.value.sessionId);
+    expect(more2.ok).toBe(true);
+    if (!more2.ok) return;
+    expect(more2.value.loadedCount).toBe(25);
+    expect(more2.value.hasMore).toBe(false);
+
+    const allIds = new Set(more2.value.groups.map((g) => g.groupId));
+    expect(allIds.size).toBe(25);
   });
 
   it('stops at max page guard', async () => {

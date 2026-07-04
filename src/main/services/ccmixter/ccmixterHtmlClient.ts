@@ -39,6 +39,7 @@ export class CcmixterHtmlClient {
         headers: {
           accept: 'text/html'
         },
+        credentials: 'omit',
         signal: controller.signal
       });
 
@@ -106,7 +107,7 @@ export function parseCcmixterArtistCatalogHtml(
     );
   }
 
-  const nextPageUrls = parseCatalogPageUrls(html, sourceUrl);
+  const nextPageUrls = parseCatalogPageUrls(html, sourceUrl, artistLogin);
   const totalCount = parseCatalogTotalCount(html);
   const mappings = [...uploadsById.values()];
   const warnings =
@@ -267,39 +268,121 @@ function parseCatalogDate(block: string): string | undefined {
   return raw.length > 0 ? raw.replace(/\s+/g, ' ') : undefined;
 }
 
-function parseCatalogTotalCount(html: string): number | undefined {
-  const pattern = /[Vv]iewing\s+\d+\s+through\s+\d+\s+of\s+(\d+)/;
-  const match = pattern.exec(html);
-  if (match?.[1]) {
-    const parsed = Number.parseInt(match[1], 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  const text = decodeHtml(stripTags(html));
-  const textMatch = /[Vv]iewing\s+\d+\s+through\s+\d+\s+of\s+(\d+)/.exec(text);
-  if (textMatch?.[1]) {
-    const parsed = Number.parseInt(textMatch[1], 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
+export interface CatalogViewingRange {
+  visibleStart: number;
+  visibleEnd: number;
+  totalCount: number;
 }
 
-function parseCatalogPageUrls(html: string, sourceUrl: string): string[] {
-  const urls = new Set<string>();
-  const pageLinkPattern = /<a\b[^>]*href=["']([^"']*(?:[?&]offset=\d+|[?&]paging=)[^"']*)["'][^>]*>/gi;
+const VIEWING_RANGE_PATTERN = /viewing\s+(\d+)\s+through\s+(\d+)\s+of\s+(\d+)/i;
+
+function normalizeCatalogText(html: string): string {
+  return decodeHtml(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+export function parseCatalogViewingRange(html: string): CatalogViewingRange | undefined {
+  const normalized = normalizeCatalogText(html);
+  const match = VIEWING_RANGE_PATTERN.exec(normalized);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const visibleStart = Number.parseInt(match[1]!, 10);
+  const visibleEnd = Number.parseInt(match[2]!, 10);
+  const totalCount = Number.parseInt(match[3]!, 10);
+
+  if (![visibleStart, visibleEnd, totalCount].every((value) => Number.isFinite(value))) {
+    return undefined;
+  }
+
+  return { visibleStart, visibleEnd, totalCount };
+}
+
+function parseCatalogTotalCount(html: string): number | undefined {
+  return parseCatalogViewingRange(html)?.totalCount;
+}
+
+function parseCatalogPageUrls(html: string, sourceUrl: string, artistLogin?: string): string[] {
+  const currentOffset = getOffsetParam(sourceUrl) ?? 0;
+  const candidates: Array<{ url: string; offset: number }> = [];
+  const seen = new Set<string>();
+  const pageLinkPattern = /<a\b[^>]*href=["']([^"']*[?&](?:amp;)?(?:offset|paging|page)=[^"']*)["'][^>]*>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = pageLinkPattern.exec(html)) !== null) {
     const resolved = resolveUrl(decodeHtml(match[1] ?? ''), sourceUrl);
-    if (resolved) {
-      urls.add(resolved);
+
+    if (!resolved || seen.has(resolved) || !isSameArtistCatalogUrl(resolved, sourceUrl, artistLogin)) {
+      continue;
     }
+
+    const offset = getOffsetParam(resolved) ?? getPagingParam(resolved);
+
+    if (typeof offset !== 'number' || offset <= currentOffset) {
+      continue;
+    }
+
+    seen.add(resolved);
+    candidates.push({ url: resolved, offset });
   }
 
-  return [...urls];
+  candidates.sort((a, b) => a.offset - b.offset);
+
+  return candidates.map((candidate) => candidate.url);
+}
+
+function getOffsetParam(url: string): number | undefined {
+  try {
+    const offset = new URL(url).searchParams.get('offset');
+    if (offset === null) {
+      return undefined;
+    }
+    const parsed = Number.parseInt(offset, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getPagingParam(url: string): number | undefined {
+  try {
+    const parsed = new URL(url);
+    const value = parsed.searchParams.get('page') ?? parsed.searchParams.get('paging');
+    if (value === null) {
+      return undefined;
+    }
+    const parsedValue = Number.parseInt(value, 10);
+    return Number.isFinite(parsedValue) ? parsedValue : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSameArtistCatalogUrl(url: string, sourceUrl: string, artistLogin?: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const source = new URL(sourceUrl);
+
+    if (parsed.hostname.toLowerCase() !== source.hostname.toLowerCase()) {
+      return false;
+    }
+
+    if (!artistLogin) {
+      return true;
+    }
+
+    const loginMatch = /\/(?:people|files)\/([^/?#]+)/i.exec(parsed.pathname);
+
+    if (!loginMatch) {
+      return true;
+    }
+
+    const pathLogin = decodeURIComponentSafe(loginMatch[1]) ?? loginMatch[1] ?? '';
+    return pathLogin.toLowerCase() === artistLogin.toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 function parseFileCandidates(html: string, sourceUrl?: string): HtmlFileCandidate[] {

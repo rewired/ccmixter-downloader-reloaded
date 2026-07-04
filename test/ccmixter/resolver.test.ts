@@ -172,7 +172,7 @@ describe('CcmixterResolver', () => {
     expect(metadata.uploads.map((upload) => upload.uploadId)).toEqual(['70001', '70002', '70003']);
     expect(metadata.uploads.map((upload) => upload.bpm)).toEqual([121, 83, undefined]);
     expect(metadata.warnings).toContain(
-      'ccMixter API artist catalog request failed for https://ccmixter.org/api/query?f=json&dataview=default&user=7OOP3D&limit=100&offset=0: fetch failed'
+      'ccMixter API artist catalog request failed for https://ccmixter.org/api/query?f=json&dataview=default&user=7OOP3D&limit=12&offset=0: fetch failed'
     );
     expect(metadata.warnings).toContain('HTML artist catalog fallback succeeded for https://ccmixter.org/people/7OOP3D with 3 upload(s).');
     expect(metadata.warnings).not.toContain('fetch failed');

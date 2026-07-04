@@ -56,6 +56,15 @@ describe('review session overrides', () => {
     expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Bad-Artist/Song-Name/BASS-.wav');
   });
 
+  it('does not leak per-group or per-file warnings into the reviewed plan-level warning list', () => {
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const plan = buildReviewedDryRunPlan(session, root());
+
+    expect(session.groups[0]?.warnings).toContain('Low confidence grouping warning.');
+    expect(plan.warnings).not.toContain('Low confidence grouping warning.');
+    expect(plan.warnings).not.toContain('Preview file classification warning.');
+  });
+
   it('excludes files from reviewed planned files while keeping them visible in review state', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan());
     const fileId = session.groups[0]!.files[1]!.fileId;

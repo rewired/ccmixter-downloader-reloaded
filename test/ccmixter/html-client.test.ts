@@ -3,7 +3,11 @@ import path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseCcmixterArtistCatalogHtml, parseCcmixterUploadHtml } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
+import {
+  parseCatalogViewingRange,
+  parseCcmixterArtistCatalogHtml,
+  parseCcmixterUploadHtml
+} from '../../src/main/services/ccmixter/ccmixterHtmlClient';
 
 describe('parseCcmixterUploadHtml', () => {
   it('extracts conservative metadata from an upload-page fixture', async () => {
@@ -69,5 +73,64 @@ describe('parseCcmixterArtistCatalogHtml', () => {
     expect(catalog.mappings.map((mapping) => mapping.upload.bpm)).toEqual([121, 83, undefined]);
     expect(catalog.mappings.every((mapping) => mapping.files.length === 0)).toBe(true);
     expect(catalog.nextPageUrls).toEqual(['https://ccmixter.org/people/7OOP3D?offset=12']);
+    expect(catalog.totalCount).toBe(96);
+  });
+
+  it('decodes HTML-entity-encoded ampersands in pagination hrefs and resolves them against the source URL', () => {
+    const html = `
+      <div id="upload_listing"></div>
+      <p>Viewing 1 through 12 of 96</p>
+      <nav class="paging">
+        <a href="https://ccmixter.org/people/7OOP3D?limit=12&amp;offset=12">More &gt;&gt;&gt;</a>
+      </nav>
+    `;
+
+    const catalog = parseCcmixterArtistCatalogHtml(html, 'https://ccmixter.org/people/7OOP3D', '7OOP3D');
+
+    expect(catalog.nextPageUrls).toEqual(['https://ccmixter.org/people/7OOP3D?limit=12&offset=12']);
+  });
+
+  it('prefers the immediate next offset over a "last page" link and ignores other-artist links', () => {
+    const html = `
+      <div id="upload_listing"></div>
+      <nav class="paging">
+        <a href="https://ccmixter.org/people/other_artist?offset=12">Other artist</a>
+        <a href="https://ccmixter.org/people/7OOP3D?offset=84">Last page &gt;&gt;</a>
+        <a href="https://ccmixter.org/people/7OOP3D?offset=12">Next</a>
+      </nav>
+    `;
+
+    const catalog = parseCcmixterArtistCatalogHtml(html, 'https://ccmixter.org/people/7OOP3D', '7OOP3D');
+
+    expect(catalog.nextPageUrls[0]).toBe('https://ccmixter.org/people/7OOP3D?offset=12');
+    expect(catalog.nextPageUrls).not.toContain('https://ccmixter.org/people/other_artist?offset=12');
+  });
+});
+
+describe('parseCatalogViewingRange', () => {
+  it('parses a plain "Viewing X through Y of Z" string', () => {
+    const range = parseCatalogViewingRange('<p>Viewing 1 through 12 of 96</p>');
+    expect(range).toEqual({ visibleStart: 1, visibleEnd: 12, totalCount: 96 });
+  });
+
+  it('parses when the numbers are separated by &nbsp;', () => {
+    const range = parseCatalogViewingRange('<p>Viewing&nbsp;1 through 12 of 96</p>');
+    expect(range).toEqual({ visibleStart: 1, visibleEnd: 12, totalCount: 96 });
+  });
+
+  it('parses when nested tags wrap the individual numbers', () => {
+    const range = parseCatalogViewingRange(
+      '<p>Viewing <b>1</b> through <b>12</b> of <b>96</b></p>'
+    );
+    expect(range).toEqual({ visibleStart: 1, visibleEnd: 12, totalCount: 96 });
+  });
+
+  it('parses when line breaks separate words and numbers', () => {
+    const range = parseCatalogViewingRange('Viewing\n1\nthrough\n12\nof\n96');
+    expect(range).toEqual({ visibleStart: 1, visibleEnd: 12, totalCount: 96 });
+  });
+
+  it('returns undefined when no viewing range text is present', () => {
+    expect(parseCatalogViewingRange('<p>No paging info here.</p>')).toBeUndefined();
   });
 });
