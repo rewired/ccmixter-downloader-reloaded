@@ -192,6 +192,14 @@ export interface AppError {
   recoverable: boolean;
 }
 
+export type ArtistCatalogScanPhase = 'idle' | 'catalog' | 'pages' | 'files' | 'planning' | 'done' | 'cancelled' | 'error';
+
+export interface ArtistCatalogUploadCheck {
+  upload: TrackUpload;
+  status: 'no-files-found' | 'could-not-check-files';
+  warnings: string[];
+}
+
 export interface ArtistCatalogState {
   sessionId: string;
   artistLogin: string;
@@ -200,6 +208,15 @@ export interface ArtistCatalogState {
   groups: StemGroup[];
   loadedCount: number;
   totalCount?: number;
+  checkedUploadCount: number;
+  totalUploadCount?: number;
+  downloadableGroupCount: number;
+  downloadableFileCount: number;
+  noFilesFoundCount: number;
+  couldNotCheckFilesCount: number;
+  noFilesFoundUploads: ArtistCatalogUploadCheck[];
+  couldNotCheckFilesUploads: ArtistCatalogUploadCheck[];
+  scanPhase: ArtistCatalogScanPhase;
   hasMore: boolean;
   isLoadingMore: boolean;
   pagingIncomplete: boolean;
@@ -211,6 +228,15 @@ export interface ArtistCatalogPageResult {
   groups: StemGroup[];
   loadedCount: number;
   totalCount?: number;
+  checkedUploadCount: number;
+  totalUploadCount?: number;
+  downloadableGroupCount: number;
+  downloadableFileCount: number;
+  noFilesFoundCount: number;
+  couldNotCheckFilesCount: number;
+  noFilesFoundUploads: ArtistCatalogUploadCheck[];
+  couldNotCheckFilesUploads: ArtistCatalogUploadCheck[];
+  scanPhase: ArtistCatalogScanPhase;
   hasMore: boolean;
   pagingIncomplete: boolean;
   warnings: string[];

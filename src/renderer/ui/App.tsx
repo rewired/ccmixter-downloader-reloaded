@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  ARTIST_SCAN_REALITY_CHECK_WARNING,
   buildReviewedDryRunPlan,
   createDownloadJobFromReviewedPlan,
   createDryRunPlanFromGroups,
@@ -11,6 +10,8 @@ import {
   validateDownloadJob,
   type AppError,
   type ArchivePreview,
+  type ArtistCatalogPageResult,
+  type ArtistCatalogScanPhase,
   type ArtistCatalogState,
   type CcmixterInput,
   type DownloadJob,
@@ -19,11 +20,13 @@ import {
   type DryRunPlan,
   type ResolvedCcmixterMetadata,
   type ReviewSession,
+  type StemGroup,
   type StemLibraryRoot
 } from '../../shared/domain';
 import type { AppInfo } from '../../shared/ipc';
+import { t } from '../i18n';
 
-import { resolveArtistCatalogCounts, selectWarningTiers } from './catalogStatus';
+import { resolveArtistCatalogCounts } from './catalogStatus';
 import { DownloadPanel } from './DownloadPanel';
 import { SourcePanel } from './SourcePanel';
 import { StatusBar } from './StatusBar';
@@ -34,7 +37,10 @@ export { resolveArtistCatalogStatus } from './catalogStatus';
 
 type Status = 'idle' | 'loading' | 'error';
 
-const DOWNLOAD_WARNING = 'Downloads start only after review and explicit confirmation.';
+const PLACEHOLDER_ROOT: StemLibraryRoot = {
+  path: '',
+  selectedAt: 'not specified'
+};
 
 export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
@@ -51,9 +57,11 @@ export function App(): JSX.Element {
   const [archivePreviewErrors, setArchivePreviewErrors] = useState<Record<string, string>>({});
   const [catalogSessionState, setCatalogSessionState] = useState<ArtistCatalogState | null>(null);
   const [catalogIsLoadingMore, setCatalogIsLoadingMore] = useState(false);
+  const [artistScanRunning, setArtistScanRunning] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
+  const cancelScanRequestedRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -84,94 +92,6 @@ export function App(): JSX.Element {
       isMounted = false;
     };
   }, []);
-
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const isLoadingMoreRef = useRef(false);
-
-  const handleLoadMoreCatalog = useCallback(async (): Promise<void> => {
-    if (!catalogSessionState || !catalogSessionState.hasMore) {
-      return;
-    }
-
-    isLoadingMoreRef.current = true;
-    setCatalogIsLoadingMore(true);
-
-    try {
-      const result = await window.ccmixterDownloader.artistCatalogLoadMore(catalogSessionState.sessionId);
-
-      if (!result.ok) {
-        setError(result.error);
-        isLoadingMoreRef.current = false;
-        setCatalogIsLoadingMore(false);
-        return;
-      }
-
-      const page = result.value;
-
-      setCatalogSessionState((prev) =>
-        prev
-          ? {
-              ...prev,
-              loadedCount: page.loadedCount,
-              hasMore: page.hasMore,
-              pagingIncomplete: page.pagingIncomplete,
-              totalCount: page.totalCount ?? prev.totalCount,
-              groups: page.groups
-            }
-          : null
-      );
-
-      isLoadingMoreRef.current = false;
-      setCatalogIsLoadingMore(false);
-
-      if (reviewSession && stemLibraryRoot) {
-        const root = stemLibraryRoot;
-        const plan = createDryRunPlanFromGroups(rawInput, root, page.groups, {
-          metadataSource: 'api',
-          placeholderData: false,
-          resolverStatus: page.hasMore ? 'partial' : 'resolved',
-          warnings: page.warnings
-        });
-
-        const newSession = createReviewSessionFromDryRunPlan(plan);
-
-        const mergedGroups = newSession.groups.map((newGroup) => {
-          const existingGroup = reviewSession.groups.find(
-            (g) => g.originalGroupId === newGroup.originalGroupId
-          );
-          return existingGroup ?? newGroup;
-        });
-
-        setReviewSession({
-          ...newSession,
-          groups: mergedGroups
-        });
-      }
-    } catch (err) {
-      setError(toAppError(err));
-      isLoadingMoreRef.current = false;
-      setCatalogIsLoadingMore(false);
-    }
-  }, [catalogSessionState, reviewSession, stemLibraryRoot, rawInput]);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !catalogSessionState?.hasMore) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && catalogSessionState?.hasMore && !isLoadingMoreRef.current) {
-          void handleLoadMoreCatalog();
-        }
-      },
-      { rootMargin: '300px' }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [catalogSessionState?.hasMore, handleLoadMoreCatalog]);
 
   useEffect(() => {
     const removeProgressListener = window.ccmixterDownloader.onDownloadProgress((progress) => {
@@ -213,9 +133,6 @@ export function App(): JSX.Element {
       const result = await window.ccmixterDownloader.chooseStemLibraryRoot();
       if (!result.cancelled) {
         setStemLibraryRoot(result.root);
-        setDryRunPlan(null);
-        setResolvedMetadata(null);
-        setReviewSession(null);
         resetDownloadState();
       }
 
@@ -268,54 +185,103 @@ export function App(): JSX.Element {
     }
   }
 
-  async function startArtistCatalog(explicitInput?: CcmixterInput): Promise<void> {
+  async function startArtistCatalog(explicitInput: CcmixterInput): Promise<void> {
     setStatus('loading');
     setError(null);
     setCatalogSessionState(null);
+    setArtistScanRunning(true);
+    setCatalogIsLoadingMore(true);
+    cancelScanRequestedRef.current = false;
 
     try {
-      const input = explicitInput ?? parsedInput;
-
-      if (!input?.artistLogin) {
+      if (!explicitInput.artistLogin) {
         setError({ code: 'NO_ARTIST_LOGIN', message: 'Artist login could not be determined.', recoverable: true });
         setStatus('error');
+        setArtistScanRunning(false);
+        setCatalogIsLoadingMore(false);
         return;
       }
 
-      if (!stemLibraryRoot) {
-        setError({ code: 'STEM_LIBRARY_ROOT_REQUIRED', message: 'Choose a Stem Library Root Folder before reviewing uploads.', recoverable: true });
+      const startResult = await window.ccmixterDownloader.artistCatalogStart(explicitInput.artistLogin, explicitInput.sourceUrl);
+
+      if (!startResult.ok) {
+        setError(startResult.error);
         setStatus('error');
+        setArtistScanRunning(false);
+        setCatalogIsLoadingMore(false);
         return;
       }
 
-      const result = await window.ccmixterDownloader.artistCatalogStart(input.artistLogin, input.sourceUrl);
+      let state: ArtistCatalogState | ArtistCatalogPageResult = startResult.value;
+      applyCatalogResult(state, explicitInput);
 
-      if (!result.ok) {
-        setError(result.error);
-        setStatus('error');
-        return;
+      while (state.hasMore && !cancelScanRequestedRef.current) {
+        setCatalogIsLoadingMore(true);
+        const pageResult = await window.ccmixterDownloader.artistCatalogLoadMore(state.sessionId);
+
+        if (!pageResult.ok) {
+          setError(pageResult.error);
+          setStatus('error');
+          break;
+        }
+
+        state = pageResult.value;
+        applyCatalogResult(state, explicitInput);
       }
 
-      const state = result.value;
-      setCatalogSessionState(state);
-
-      const plan = createDryRunPlanFromGroups(rawInput, stemLibraryRoot, state.groups, {
-        metadataSource: 'api',
-        placeholderData: false,
-        resolverStatus: state.hasMore ? 'partial' : 'resolved',
-        warnings: state.warnings
-      });
-
-      setParsedInput(plan.input);
-      setResolvedMetadata(null);
-      setDryRunPlan(plan);
-      setReviewSession(createReviewSessionFromDryRunPlan(plan));
-      resetDownloadState();
+      setCatalogIsLoadingMore(false);
+      setArtistScanRunning(false);
       setStatus('idle');
     } catch (err) {
       setError(toAppError(err));
+      setCatalogIsLoadingMore(false);
+      setArtistScanRunning(false);
       setStatus('error');
     }
+  }
+
+  async function cancelArtistScan(): Promise<void> {
+    const sessionId = catalogSessionState?.sessionId;
+    cancelScanRequestedRef.current = true;
+    setArtistScanRunning(false);
+
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      const cancelResult = await window.ccmixterDownloader.artistCatalogCancel(sessionId);
+      if (cancelResult.ok) {
+        applyCatalogResult(cancelResult.value, parsedInput);
+      } else {
+        setError(cancelResult.error);
+      }
+    } catch (cancelError) {
+      setError(toAppError(cancelError));
+    } finally {
+      setCatalogIsLoadingMore(false);
+      setStatus('idle');
+    }
+  }
+
+  function applyCatalogResult(result: ArtistCatalogState | ArtistCatalogPageResult, input: CcmixterInput | null): void {
+    setCatalogSessionState((previous) => ({
+      ...(previous ?? toCatalogStateShell(result, input)),
+      ...result,
+      totalCount: result.totalCount ?? previous?.totalCount,
+      totalUploadCount: result.totalUploadCount ?? previous?.totalUploadCount,
+      isLoadingMore: 'isLoadingMore' in result ? result.isLoadingMore : false
+    }));
+
+    const root = stemLibraryRoot ?? PLACEHOLDER_ROOT;
+    const plan = createPlanFromCatalogResult(rawInput, root, result.groups, result);
+    const newSession = createReviewSessionFromDryRunPlan(plan);
+
+    setParsedInput(plan.input);
+    setResolvedMetadata(null);
+    setDryRunPlan(plan);
+    setReviewSession((currentSession) => (currentSession ? mergeReviewSessions(currentSession, newSession) : newSession));
+    resetDownloadState();
   }
 
   async function createDryRunPlan(): Promise<void> {
@@ -323,18 +289,42 @@ export function App(): JSX.Element {
     setError(null);
 
     try {
-      const planResult = await window.ccmixterDownloader.createDryRunPlan(rawInput, stemLibraryRoot);
+      if (stemLibraryRoot) {
+        const planResult = await window.ccmixterDownloader.createDryRunPlan(rawInput, stemLibraryRoot);
 
-      if (!planResult.ok) {
-        setError(planResult.error);
-        setStatus('error');
-        return;
+        if (!planResult.ok) {
+          setError(planResult.error);
+          setStatus('error');
+          return;
+        }
+
+        setParsedInput(planResult.value.input);
+        setResolvedMetadata(null);
+        setDryRunPlan(planResult.value);
+        setReviewSession(createReviewSessionFromDryRunPlan(planResult.value));
+      } else {
+        const metadataResult = await window.ccmixterDownloader.resolveMetadata(rawInput);
+
+        if (!metadataResult.ok) {
+          setError(metadataResult.error);
+          setStatus('error');
+          return;
+        }
+
+        const plan = createDryRunPlanFromGroups(rawInput, PLACEHOLDER_ROOT, metadataResult.value.groups, {
+          createdAt: metadataResult.value.createdAt,
+          input: metadataResult.value.input,
+          metadataSource: metadataResult.value.metadataSource,
+          placeholderData: metadataResult.value.metadataSource === 'fixture',
+          resolverStatus: metadataResult.value.status,
+          warnings: metadataResult.value.warnings
+        });
+        setParsedInput(plan.input);
+        setResolvedMetadata(null);
+        setDryRunPlan(plan);
+        setReviewSession(createReviewSessionFromDryRunPlan(plan));
       }
 
-      setParsedInput(planResult.value.input);
-      setResolvedMetadata(null);
-      setDryRunPlan(planResult.value);
-      setReviewSession(createReviewSessionFromDryRunPlan(planResult.value));
       resetDownloadState();
       setStatus('idle');
     } catch (planError) {
@@ -352,6 +342,7 @@ export function App(): JSX.Element {
       setParsedInput(parsed);
       setResolvedMetadata(null);
       setReviewSession(null);
+      setCatalogSessionState(null);
       resetDownloadState();
 
       if (isArtistCatalogInput(parsed)) {
@@ -362,10 +353,17 @@ export function App(): JSX.Element {
     } catch (scanError) {
       setError(toAppError(scanError));
       setStatus('error');
+      setArtistScanRunning(false);
+      setCatalogIsLoadingMore(false);
     }
   }
 
   async function prepareDownloadJob(reviewedPlan: DryRunPlan): Promise<void> {
+    if (!stemLibraryRoot) {
+      await chooseStemLibraryRoot();
+      return;
+    }
+
     setStatus('loading');
     setError(null);
     setDownloadResult(null);
@@ -462,10 +460,13 @@ export function App(): JSX.Element {
     setArchivePreviewErrors({});
   }
 
-  const canScanSource = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
+  const canScanSource = rawInput.trim().length > 0 && status !== 'loading';
+  const activeInput = dryRunPlan?.input ?? resolvedMetadata?.input ?? parsedInput;
+  const isArtistCatalog = activeInput ? isArtistCatalogInput(activeInput) : false;
+  const scanPhase: ArtistCatalogScanPhase = catalogSessionState?.scanPhase ?? (artistScanRunning ? 'catalog' : 'idle');
   const reviewedDryRunPlan = useMemo(
-    () => (dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, dryRunPlan.stemLibraryRoot) : dryRunPlan),
-    [dryRunPlan, reviewSession]
+    () => (dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, stemLibraryRoot ?? dryRunPlan.stemLibraryRoot) : dryRunPlan),
+    [dryRunPlan, reviewSession, stemLibraryRoot]
   );
   const advisoryDownloadJob = useMemo(
     () => (reviewedDryRunPlan ? createDownloadJobFromReviewedPlan(reviewedDryRunPlan, { jobId: 'renderer-advisory-job' }) : null),
@@ -473,12 +474,12 @@ export function App(): JSX.Element {
   );
   const advisoryDownloadValidation = advisoryDownloadJob ? validateDownloadJob(advisoryDownloadJob) : null;
   const advisoryDownloadSummary = advisoryDownloadJob ? summarizeDownloadJob(advisoryDownloadJob) : null;
-  const activeInput = dryRunPlan?.input ?? resolvedMetadata?.input ?? parsedInput;
-  const isArtistCatalog = activeInput ? isArtistCatalogInput(activeInput) : false;
   const catalogCounts = isArtistCatalog ? resolveArtistCatalogCounts(catalogSessionState, resolvedMetadata, dryRunPlan, reviewedDryRunPlan) : null;
   const canPrepareDownload =
     Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
     status !== 'loading';
+  const songCount = reviewSession?.groups.filter((group) => group.files.some((file) => file.included)).length ?? 0;
+  const downloadStatus = downloadQueueState?.status === 'running' ? 'downloading' : reviewedDryRunPlan ? 'dry-run' : 'ready';
 
   const listMode = useMemo<ListMode | null>(() => {
     if (reviewSession) {
@@ -496,8 +497,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     const activeIds = listMode
       ? listMode.kind === 'review'
-        ? listMode.reviewSession.groups.map((group) => group.reviewGroupId)
-        : listMode.groups.map((group) => group.groupId)
+        ? listMode.reviewSession.groups.filter((group) => group.files.length > 0).map((group) => group.reviewGroupId)
+        : listMode.groups.filter((group) => group.files.length > 0).map((group) => group.groupId)
       : [];
 
     if (activeIds.length === 0) {
@@ -512,45 +513,33 @@ export function App(): JSX.Element {
     }
   }, [listMode, selectedGroupId]);
 
-  const selectedGroupForTiers = listMode
-    ? listMode.kind === 'review'
-      ? listMode.reviewSession.groups.find((group) => group.reviewGroupId === selectedGroupId) ?? null
-      : listMode.groups.find((group) => group.groupId === selectedGroupId) ?? null
-    : null;
-  const globalWarnings = reviewedDryRunPlan?.warnings ?? resolvedMetadata?.warnings ?? [];
-  const warningTiers = selectWarningTiers(globalWarnings, selectedGroupForTiers);
-
   return (
     <main className="app-shell">
       <div className="workspace">
         <header className="app-header">
           <div>
-            <p className="eyebrow">Stem library planner</p>
+            <p className="eyebrow">{t('app.eyebrow')}</p>
             <h1>{appInfo?.name ?? 'ccMixter Stem Downloader'}</h1>
           </div>
           <span className="version">v{appInfo?.version ?? '0.1.0'}</span>
         </header>
 
-        <section className="status-strip" role="status">
-          <strong>{DOWNLOAD_WARNING}</strong>
-          <span>No ZIP extraction or attribution writing happens in this slice.</span>
-        </section>
-
         <SourcePanel
           rawInput={rawInput}
           onRawInputChange={setRawInput}
           onScanSource={() => void scanSource()}
-          onParseInput={() => void parseInput()}
-          onResolveMetadata={() => void resolveMetadata()}
+          onCancelScan={() => void cancelArtistScan()}
           canScan={canScanSource}
+          canCancelScan={artistScanRunning && Boolean(catalogSessionState)}
           status={status}
         />
 
-        {status === 'loading' ? <p className="state">Working...</p> : null}
+        <ScanProgress phase={scanPhase} counts={catalogCounts} running={artistScanRunning || catalogIsLoadingMore} />
+
         {error ? (
           <section className="error" role="alert">
             <strong>{error.message}</strong>
-            <span>{error.recoverable ? 'You can adjust the input or root folder and try again.' : 'Restart may be required.'}</span>
+            <span>{error.recoverable ? 'Adjust the input or download folder and try again.' : 'Restart may be required.'}</span>
           </section>
         ) : null}
 
@@ -562,66 +551,44 @@ export function App(): JSX.Element {
           catalogIsLoadingMore={catalogIsLoadingMore}
           hasMore={catalogSessionState?.hasMore ?? false}
           pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
+          onParseInput={() => void parseInput()}
+          onResolveMetadata={() => void resolveMetadata()}
+          status={status}
         />
 
-        {isArtistCatalog ? (
-          <section className="banner artist-scan-banner" role="status">
-            <strong>Review artist uploads</strong>
-            <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
-          </section>
-        ) : null}
-
-        {warningTiers.global.length > 0 ? (
-          <ul className="warning-list warning-list--global" aria-label="Global warnings">
-            {warningTiers.global.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-
-        <section className="results" aria-label="Upload review">
+        <section className="results" aria-label="Song and file review">
           {listMode ? (
-            <UploadListDetail mode={listMode} selectedGroupId={selectedGroupId} onSelectGroup={setSelectedGroupId} />
+            <UploadListDetail
+              mode={listMode}
+              selectedGroupId={selectedGroupId}
+              onSelectGroup={setSelectedGroupId}
+              noFilesFoundUploads={catalogSessionState?.noFilesFoundUploads ?? []}
+              couldNotCheckFilesUploads={catalogSessionState?.couldNotCheckFilesUploads ?? []}
+            />
           ) : (
-            <p className="empty">
-              {stemLibraryRoot
-                ? 'Enter a ccMixter artist, upload link, or upload ID to scan available uploads. No downloads will start without confirmation.'
-                : 'Stem library not set. You can scan sources now, but choose a folder before creating a download plan.'}
-            </p>
+            <p className="empty">{t('review.empty')}</p>
           )}
 
-          {isArtistCatalog ? <div ref={sentinelRef} id="catalog-scroll-sentinel" /> : null}
-
-          {dryRunPlan ? (
-            <>
-              <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
-              <ul className="path-list">
-                {reviewedDryRunPlan?.plannedFiles.map((file, index) => (
-                  <li key={`${file.targetRelativePath}-${index}`}>
-                    <span>{file.targetRelativePath}</span>
-                  </li>
-                ))}
-              </ul>
-              {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
-                <DownloadPanel
-                  advisoryJob={advisoryDownloadJob}
-                  advisorySummary={advisoryDownloadSummary}
-                  advisoryValidationOk={advisoryDownloadValidation.ok}
-                  canPrepareDownload={canPrepareDownload}
-                  downloadJob={downloadJob}
-                  downloadQueueState={downloadQueueState}
-                  downloadResult={downloadResult}
-                  archivePreviews={archivePreviews}
-                  archivePreviewErrors={archivePreviewErrors}
-                  isArtistCatalog={isArtistCatalog}
-                  onCancel={(jobId) => void cancelDownloadJob(jobId)}
-                  onConfirm={(jobId) => void confirmDownloadJob(jobId)}
-                  onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
-                  onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
-                  status={status}
-                />
-              ) : null}
-            </>
+          {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
+            <DownloadPanel
+              advisoryJob={advisoryDownloadJob}
+              advisorySummary={advisoryDownloadSummary}
+              advisoryValidationOk={advisoryDownloadValidation.ok}
+              canPrepareDownload={canPrepareDownload}
+              hasDownloadFolder={Boolean(stemLibraryRoot)}
+              songCount={songCount}
+              downloadJob={downloadJob}
+              downloadQueueState={downloadQueueState}
+              downloadResult={downloadResult}
+              archivePreviews={archivePreviews}
+              archivePreviewErrors={archivePreviewErrors}
+              onCancel={(jobId) => void cancelDownloadJob(jobId)}
+              onChooseDownloadFolder={() => void chooseStemLibraryRoot()}
+              onConfirm={(jobId) => void confirmDownloadJob(jobId)}
+              onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
+              onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
+              status={status}
+            />
           ) : null}
         </section>
       </div>
@@ -631,15 +598,109 @@ export function App(): JSX.Element {
         onChooseRoot={() => void chooseStemLibraryRoot()}
         isArtistCatalog={isArtistCatalog}
         catalogCounts={catalogCounts}
-        catalogIsLoadingMore={catalogIsLoadingMore}
-        hasMore={catalogSessionState?.hasMore ?? false}
-        pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
-        sourceMode={dryRunPlan?.metadataSource ?? resolvedMetadata?.metadataSource ?? null}
+        scanPhase={scanPhase}
         plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
+        downloadStatus={downloadStatus}
         status={status}
       />
     </main>
   );
+}
+
+function ScanProgress({
+  phase,
+  counts,
+  running
+}: {
+  phase: ArtistCatalogScanPhase;
+  counts: ReturnType<typeof resolveArtistCatalogCounts>;
+  running: boolean;
+}): JSX.Element | null {
+  if (!running && !counts) {
+    return null;
+  }
+
+  const message = resolveScanMessage(phase, counts);
+
+  return (
+    <section className="scan-progress" role="status">
+      <strong>{message}</strong>
+      {counts ? (
+        <span>
+          Found {counts.downloadableGroupCount} song{counts.downloadableGroupCount === 1 ? '' : 's'} - {counts.downloadableFileCount} file{counts.downloadableFileCount === 1 ? '' : 's'}
+        </span>
+      ) : null}
+    </section>
+  );
+}
+
+function resolveScanMessage(phase: ArtistCatalogScanPhase, counts: ReturnType<typeof resolveArtistCatalogCounts>): string {
+  if (phase === 'catalog') {
+    return t('scan.catalog');
+  }
+
+  if (phase === 'pages' || phase === 'files') {
+    const total = counts?.totalUploadCount ?? counts?.totalCount;
+    return `${t('scan.pages')} ${counts?.checkedUploadCount ?? 0}${typeof total === 'number' ? ` of ${total}` : ''}`;
+  }
+
+  if (phase === 'planning') {
+    return t('scan.planning');
+  }
+
+  if (phase === 'cancelled') {
+    return t('scan.cancelled');
+  }
+
+  return t('scan.done');
+}
+
+function createPlanFromCatalogResult(
+  rawInput: string,
+  root: StemLibraryRoot,
+  groups: StemGroup[],
+  result: ArtistCatalogState | ArtistCatalogPageResult
+): DryRunPlan {
+  return createDryRunPlanFromGroups(rawInput, root, groups, {
+    metadataSource: groups.some((group) => group.metadataSource === 'html-enriched') ? 'html-enriched' : 'api',
+    placeholderData: false,
+    resolverStatus: result.hasMore || result.scanPhase === 'cancelled' ? 'partial' : 'resolved',
+    warnings: result.warnings
+  });
+}
+
+function toCatalogStateShell(result: ArtistCatalogState | ArtistCatalogPageResult, input: CcmixterInput | null): ArtistCatalogState {
+  return {
+    sessionId: result.sessionId,
+    artistLogin: input?.artistLogin ?? input?.normalizedArtistLogin ?? 'not specified',
+    sourceUrl: input?.sourceUrl ?? '',
+    loadedUploadIds: [],
+    groups: [],
+    loadedCount: 0,
+    checkedUploadCount: 0,
+    downloadableGroupCount: 0,
+    downloadableFileCount: 0,
+    noFilesFoundCount: 0,
+    couldNotCheckFilesCount: 0,
+    noFilesFoundUploads: [],
+    couldNotCheckFilesUploads: [],
+    scanPhase: 'idle',
+    hasMore: false,
+    isLoadingMore: false,
+    pagingIncomplete: false,
+    warnings: []
+  };
+}
+
+function mergeReviewSessions(existingSession: ReviewSession, newSession: ReviewSession): ReviewSession {
+  const existingByOriginalId = new Map(existingSession.groups.map((group) => [group.originalGroupId, group]));
+
+  return {
+    ...newSession,
+    groups: newSession.groups.map((group) => existingByOriginalId.get(group.originalGroupId) ?? group),
+    overrides: existingSession.overrides,
+    warnings: [...newSession.warnings, ...existingSession.warnings].filter(unique)
+  };
 }
 
 function toAppError(error: unknown): AppError {
@@ -681,4 +742,8 @@ function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {
     warnings: job.warnings,
     errors: job.errors
   };
+}
+
+function unique<T>(value: T, index: number, all: T[]): boolean {
+  return all.indexOf(value) === index;
 }

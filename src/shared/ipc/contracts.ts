@@ -28,7 +28,8 @@ export const IPC_CHANNELS = {
   downloadProgress: 'download:progress',
   downloadCompleted: 'download:completed',
   artistCatalogStart: 'ccmixter:artist-catalog-start',
-  artistCatalogLoadMore: 'ccmixter:artist-catalog-load-more'
+  artistCatalogLoadMore: 'ccmixter:artist-catalog-load-more',
+  artistCatalogCancel: 'ccmixter:artist-catalog-cancel'
 } as const;
 
 export interface AppInfo {
@@ -65,6 +66,7 @@ export interface CcmixterDownloaderApi {
   previewArchiveDownload(jobId: string, fileJobId: string): Promise<IpcResult<ArchivePreview>>;
   artistCatalogStart(artistLogin: string, sourceUrl?: string): Promise<IpcResult<ArtistCatalogState>>;
   artistCatalogLoadMore(sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>>;
+  artistCatalogCancel(sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   onDownloadCompleted(callback: (result: DownloadResult) => void): () => void;
 }

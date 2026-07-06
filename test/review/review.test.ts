@@ -28,7 +28,7 @@ describe('review session overrides', () => {
 
     expect(session.groups).toHaveLength(2);
     expect(session.groups[0]?.originalGroup).toBe(plan.groups[0]);
-    expect(session.groups[0]?.songFolderName).toBe('Boxcar heading West (145 bpm)');
+    expect(session.groups[0]?.songFolderName).toBe('Boxcar heading West (145 BPM)');
     expect(session.groups[0]?.files[0]?.originalFile).toBe(plan.groups[0]?.files[0]);
   });
 
@@ -76,12 +76,12 @@ describe('review session overrides', () => {
     expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).not.toContain('preview.mp3');
   });
 
-  it('defaults artist catalog review files to excluded while keeping them visible', () => {
+  it('selects artist catalog review files by default while keeping them visible', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan('WiseMan'));
 
     expect(session.sourcePlan.input.kind).toBe('artist-name');
-    expect(session.groups[0]?.files.map((file) => file.included)).toEqual([false, false]);
-    expect(session.groups[1]?.files.map((file) => file.included)).toEqual([false]);
+    expect(session.groups[0]?.files.map((file) => file.included)).toEqual([true, true]);
+    expect(session.groups[1]?.files.map((file) => file.included)).toEqual([true]);
   });
 
   it('keeps upload-link, upload-id, and fixture review files included by default', () => {
@@ -97,13 +97,13 @@ describe('review session overrides', () => {
     expect(fixtureSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
   });
 
-  it('creates zero planned files from an untouched artist catalog review', () => {
+  it('plans all discovered files from an untouched artist catalog review', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/people/WiseMan'));
     const plan = buildReviewedDryRunPlan(session, root());
 
     expect(session.sourcePlan.input.kind).toBe('artist-link');
-    expect(plan.plannedFiles).toEqual([]);
-    expect(plan.warnings).toContain('No files are included in the reviewed dry-run plan.');
+    expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).toEqual(['BASS.flac', 'preview.mp3', 'VOCALS.flac']);
+    expect(plan.warnings).not.toContain('No files are included in the reviewed dry-run plan.');
   });
 
   it('applies candidate review actions explicitly', () => {
@@ -155,7 +155,7 @@ describe('review session overrides', () => {
     const reset = resetGroupOverrides(renamed, 'group-a');
 
     expect(reset.groups[0]?.artistName).toBe('Wiseman');
-    expect(reset.groups[0]?.songFolderName).toBe('Boxcar heading West (145 bpm)');
+    expect(reset.groups[0]?.songFolderName).toBe('Boxcar heading West (145 BPM)');
     expect(reset.groups[0]?.files[0]?.targetFilename).toBe('BASS.flac');
   });
 

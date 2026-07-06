@@ -45,6 +45,8 @@ const api: CcmixterDownloaderApi = {
     ipcRenderer.invoke(IPC_CHANNELS.artistCatalogStart, artistLogin, sourceUrl) as Promise<IpcResult<ArtistCatalogState>>,
   artistCatalogLoadMore: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.artistCatalogLoadMore, sessionId) as Promise<IpcResult<ArtistCatalogPageResult>>,
+  artistCatalogCancel: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.artistCatalogCancel, sessionId) as Promise<IpcResult<ArtistCatalogPageResult>>,
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: DownloadProgress): void => callback(progress);
     ipcRenderer.on(IPC_CHANNELS.downloadProgress, listener);

@@ -318,7 +318,7 @@ describe('CcmixterResolver', () => {
 
     expect(plan.placeholderData).toBe(false);
     expect(plan.metadataSource).toBe('api');
-    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Wiseman/Boxcar heading West (145 bpm)/GUITAR-main.flac');
+    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Wiseman/Boxcar heading West (145 BPM)/GUITAR-main.flac');
     expect(plan.warnings).toContain('No files will be downloaded.');
     expect(plan.warnings).not.toContain('No ccMixter scan happened.');
   });
@@ -339,8 +339,8 @@ describe('CcmixterResolver', () => {
     expect(plan.placeholderData).toBe(true);
     expect(plan.resolverStatus).toBe('fixture');
     expect(plan.metadataSource).toBe('fixture');
-    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze_1.mp3');
-    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/fixture-missing-url.wav');
+    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 BPM)/Zutsuri_-_Haze_1.mp3');
+    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 BPM)/fixture-missing-url.wav');
     expect(plan.warnings).toContain('Fixture/sample data: fixture:haze-smoke uses recorded ccMixter metadata for UI smoke testing.');
   });
 
@@ -388,8 +388,8 @@ describe('CcmixterResolver', () => {
     ]);
     expect(metadata.groups[0]?.files.map((file) => file.classification?.role)).toEqual(['preview', 'archive', 'archive']);
     expect(metadata.groups[0]?.files.every((file) => (file.classification?.reasons.length ?? 0) > 0)).toBe(true);
-    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze_1.mp3');
-    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 bpm)/Zutsuri_-_Haze.zip');
+    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 BPM)/Zutsuri_-_Haze_1.mp3');
+    expect(plan.plannedFiles.map((file) => file.targetRelativePath)).toContain('Zutsuri/Haze (97 BPM)/Zutsuri_-_Haze.zip');
     expect(metadata.warnings).toContain(RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING);
   });
 
@@ -425,7 +425,7 @@ describe('CcmixterResolver', () => {
       'soundbitch_-_pls-crepman-grunge-90bpm.mp3'
     ]);
     expect(plan.plannedFiles[0]?.targetRelativePath).toBe(
-      'Chillheimer&Soundbitch/pls-crepman-grunge-90bpm (90 bpm)/soundbitch_-_pls-crepman-grunge-90bpm.mp3'
+      'Chillheimer&Soundbitch/pls-crepman-grunge-90bpm (90 BPM)/soundbitch_-_pls-crepman-grunge-90bpm.mp3'
     );
   });
 });

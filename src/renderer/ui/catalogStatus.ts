@@ -10,8 +10,14 @@ import type {
 export interface ArtistCatalogCounts {
   loadedCount: number;
   totalCount?: number;
+  checkedUploadCount: number;
+  totalUploadCount?: number;
   plannedFileCount: number;
   includedFileCount: number;
+  downloadableGroupCount: number;
+  downloadableFileCount: number;
+  noFilesFoundCount: number;
+  couldNotCheckFilesCount: number;
 }
 
 export function resolveArtistCatalogCounts(
@@ -24,8 +30,14 @@ export function resolveArtistCatalogCounts(
     return {
       loadedCount: catalogSessionState.loadedCount,
       totalCount: catalogSessionState.totalCount,
+      checkedUploadCount: catalogSessionState.checkedUploadCount,
+      totalUploadCount: catalogSessionState.totalUploadCount,
       plannedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
-      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
+      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0,
+      downloadableGroupCount: catalogSessionState.downloadableGroupCount,
+      downloadableFileCount: catalogSessionState.downloadableFileCount,
+      noFilesFoundCount: catalogSessionState.noFilesFoundCount,
+      couldNotCheckFilesCount: catalogSessionState.couldNotCheckFilesCount
     };
   }
 
@@ -37,8 +49,14 @@ export function resolveArtistCatalogCounts(
     return {
       loadedCount: uploadIds.size,
       totalCount: undefined,
+      checkedUploadCount: uploadIds.size,
+      totalUploadCount: undefined,
       plannedFileCount: dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
-      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
+      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0,
+      downloadableGroupCount: dryRunPlan?.groups.length ?? resolvedMetadata?.groups.length ?? 0,
+      downloadableFileCount: dryRunPlan?.groups.reduce((sum, group) => sum + group.files.length, 0) ?? resolvedMetadata?.files.length ?? 0,
+      noFilesFoundCount: 0,
+      couldNotCheckFilesCount: 0
     };
   }
 
@@ -77,7 +95,7 @@ export function resolveArtistCatalogStatus(
 }
 
 export function resolveStatusBarRootLabel(root: StemLibraryRoot | null): string {
-  return root?.path ?? 'Stem library not set';
+  return root?.path ?? 'Choose download folder';
 }
 
 export interface WarningTiers {

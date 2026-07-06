@@ -98,7 +98,7 @@ describe('sanitizePathSegment', () => {
 
 describe('path planning', () => {
   it('builds song folders with BPM when available', () => {
-    expect(buildSongFolderName('Songname (Source)', 96)).toBe('Songname (96 bpm)');
+    expect(buildSongFolderName('Songname (Source)', 96)).toBe('Songname (96 BPM)');
     expect(buildSongFolderName('Songname')).toBe('Songname');
   });
 
@@ -106,7 +106,7 @@ describe('path planning', () => {
     const group = sampleStemGroups[0]!;
     const file = group.files[0]!;
 
-    expect(buildPlannedTargetPath(group, file)).toBe('Test Artist/Boxcar heading West (145 bpm)/GUITAR-main-.flac');
+    expect(buildPlannedTargetPath(group, file)).toBe('Test Artist/Boxcar heading West (145 BPM)/GUITAR-main-.flac');
   });
 
   it('creates dry-run paths below the Stem Library Root Folder', () => {
@@ -121,9 +121,9 @@ describe('path planning', () => {
     );
 
     expect(plan.placeholderData).toBe(true);
-    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Test Artist/Boxcar heading West (145 bpm)/GUITAR-main-.flac');
+    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Test Artist/Boxcar heading West (145 BPM)/GUITAR-main-.flac');
     expect(plan.plannedFiles[0]?.targetAbsolutePath).toBe(
-      'D:/Stem Library/Test Artist/Boxcar heading West (145 bpm)/GUITAR-main-.flac'
+      'D:/Stem Library/Test Artist/Boxcar heading West (145 BPM)/GUITAR-main-.flac'
     );
     expect(plan.warnings).toContain('No files will be downloaded.');
   });

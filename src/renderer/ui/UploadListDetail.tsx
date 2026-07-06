@@ -1,25 +1,18 @@
 import { useMemo } from 'react';
 
 import {
-  clearIncludedDownloadCandidates,
-  excludeArchiveDownloadCandidates,
-  excludePreviewDownloadCandidates,
   getDownloadCandidateClassification,
-  includeRecommendedDownloadCandidates,
-  markGroupAccepted,
-  markGroupNeedsReview,
-  mergeGroups,
   renameArtist,
   renameFile,
   renameGroup,
-  resetGroupOverrides,
-  splitGroup,
   toggleFileIncluded,
+  type ArtistCatalogUploadCheck,
   type ReviewFile,
   type ReviewGroup,
   type ReviewSession,
   type StemGroup
 } from '../../shared/domain';
+import { t } from '../i18n';
 
 export interface UploadRow {
   id: string;
@@ -27,10 +20,8 @@ export interface UploadRow {
   artist: string;
   bpm?: number;
   license?: string;
-  sourceMode: string;
   fileCount: number;
-  warningCount: number;
-  status?: ReviewGroup['status'];
+  badges: string[];
 }
 
 export function toReviewRow(group: ReviewGroup): UploadRow {
@@ -42,10 +33,8 @@ export function toReviewRow(group: ReviewGroup): UploadRow {
     artist: group.artistName,
     bpm: group.originalGroup.bpm,
     license: firstUpload?.licenseSummary,
-    sourceMode: group.originalGroup.metadataSource,
     fileCount: group.files.filter((file) => file.included).length,
-    warningCount: group.warnings.length + group.overrideWarnings.length,
-    status: group.status
+    badges: collectBadges(group.files.map((file) => file.originalFile))
   };
 }
 
@@ -58,9 +47,8 @@ export function toRawRow(group: StemGroup): UploadRow {
     artist: group.artist,
     bpm: group.bpm,
     license: firstUpload?.licenseSummary,
-    sourceMode: group.metadataSource,
     fileCount: group.files.length,
-    warningCount: group.warnings.length
+    badges: collectBadges(group.files)
   };
 }
 
@@ -71,24 +59,23 @@ export type ListMode =
 export function UploadListDetail({
   mode,
   selectedGroupId,
-  onSelectGroup
+  onSelectGroup,
+  noFilesFoundUploads,
+  couldNotCheckFilesUploads
 }: {
   mode: ListMode;
   selectedGroupId: string | null;
   onSelectGroup: (id: string) => void;
+  noFilesFoundUploads: ArtistCatalogUploadCheck[];
+  couldNotCheckFilesUploads: ArtistCatalogUploadCheck[];
 }): JSX.Element {
   const rows = useMemo(
-    () => (mode.kind === 'review' ? mode.reviewSession.groups.map(toReviewRow) : mode.groups.map(toRawRow)),
+    () =>
+      (mode.kind === 'review' ? mode.reviewSession.groups.map(toReviewRow) : mode.groups.map(toRawRow)).filter(
+        (row) => row.fileCount > 0
+      ),
     [mode]
   );
-
-  if (rows.length === 0) {
-    return (
-      <p className="empty">
-        {mode.kind === 'review' ? 'No review groups are available yet.' : 'No resolver groups are available yet.'}
-      </p>
-    );
-  }
 
   const selectedReviewGroup =
     mode.kind === 'review' ? mode.reviewSession.groups.find((group) => group.reviewGroupId === selectedGroupId) ?? null : null;
@@ -96,78 +83,65 @@ export function UploadListDetail({
 
   return (
     <div className="upload-list-detail">
-      <div>
-        {mode.kind === 'review' ? (
-          <div className="review-actions candidate-actions" aria-label="Review file selection actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => mode.onChange(includeRecommendedDownloadCandidates(mode.reviewSession))}
-            >
-              Include recommended source/stem/archive files
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => mode.onChange(excludePreviewDownloadCandidates(mode.reviewSession))}
-            >
-              Exclude previews
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => mode.onChange(excludeArchiveDownloadCandidates(mode.reviewSession))}
-            >
-              Exclude archives
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => mode.onChange(clearIncludedDownloadCandidates(mode.reviewSession))}
-            >
-              Clear all included files
-            </button>
-          </div>
-        ) : null}
+      <div className="song-list-column">
+        {rows.length === 0 ? (
+          <p className="empty">{t('review.empty')}</p>
+        ) : (
+          <ul className="upload-list" aria-label="Songs with downloadable files">
+            {rows.map((row) => (
+              <li key={row.id}>
+                <button
+                  type="button"
+                  className={`upload-list-row${row.id === selectedGroupId ? ' selected' : ''}`}
+                  onClick={() => onSelectGroup(row.id)}
+                  aria-pressed={row.id === selectedGroupId}
+                >
+                  <div className="upload-list-row__top">
+                    <span className="upload-list-row__title">{row.title}</span>
+                    <span>{row.fileCount} file{row.fileCount === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="upload-list-row__meta">
+                    <span>{row.artist}</span>
+                    {typeof row.bpm === 'number' ? <span>{row.bpm} BPM</span> : null}
+                    {row.license ? <span>{row.license}</span> : null}
+                  </div>
+                  {row.badges.length > 0 ? (
+                    <div className="candidate-badges">
+                      {row.badges.map((badge) => (
+                        <span className="candidate-badge" key={badge}>
+                          {badge}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
-        <ul className="upload-list" aria-label="Uploads">
-          {rows.map((row) => (
-            <li key={row.id}>
-              <button
-                type="button"
-                className={`upload-list-row${row.id === selectedGroupId ? ' selected' : ''}`}
-                onClick={() => onSelectGroup(row.id)}
-                aria-pressed={row.id === selectedGroupId}
-              >
-                <div className="upload-list-row__top">
-                  <span className="upload-list-row__title">{row.title}</span>
-                  {row.status ? <span className={`source-badge status-${row.status}`}>{row.status}</span> : null}
-                </div>
-                <div className="upload-list-row__meta">
-                  <span>{row.artist}</span>
-                  {typeof row.bpm === 'number' ? <span>{row.bpm} BPM</span> : null}
-                  {row.license ? <span>{row.license}</span> : null}
-                  <span>
-                    {row.fileCount} file{row.fileCount === 1 ? '' : 's'}
-                  </span>
-                  {row.warningCount > 0 ? <span className="upload-list-row__warning">⚠ {row.warningCount}</span> : null}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <UploadCheckSection
+          title={t('review.noFiles.title')}
+          body={t('review.noFiles.body')}
+          uploads={noFilesFoundUploads}
+        />
+        <UploadCheckSection
+          title={t('review.couldNotCheck.title')}
+          body={t('review.couldNotCheck.body')}
+          uploads={couldNotCheckFilesUploads}
+        />
       </div>
 
       {mode.kind === 'review' ? (
         selectedReviewGroup ? (
           <ReviewGroupDetail reviewSession={mode.reviewSession} group={selectedReviewGroup} onChange={mode.onChange} />
         ) : (
-          <p className="empty">Select an upload to see details.</p>
+          <p className="empty">{t('review.selectSong')}</p>
         )
       ) : selectedRawGroup ? (
         <RawGroupDetail group={selectedRawGroup} />
       ) : (
-        <p className="empty">Select an upload to see details.</p>
+        <p className="empty">{t('review.selectSong')}</p>
       )}
     </div>
   );
@@ -182,63 +156,30 @@ function ReviewGroupDetail({
   group: ReviewGroup;
   onChange: (session: ReviewSession) => void;
 }): JSX.Element {
-  const availableMergeTargets = reviewSession.groups.filter((candidate) => candidate.reviewGroupId !== group.reviewGroupId);
-
   return (
-    <section className="upload-detail" aria-label="Selected upload details">
+    <section className="upload-detail" aria-label="Selected song files">
       <div className="group-heading">
         <div>
           <h2>{group.songFolderName}</h2>
           <span>by {group.artistName}</span>
         </div>
-        <span className={`source-badge status-${group.status}`}>{group.status}</span>
       </div>
 
-      <div className="review-actions">
-        <button type="button" className="secondary" onClick={() => onChange(markGroupAccepted(reviewSession, group.reviewGroupId))}>
-          Accept
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => onChange(markGroupNeedsReview(reviewSession, group.reviewGroupId))}
-        >
-          Needs review
-        </button>
-        <button type="button" className="secondary" onClick={() => onChange(resetGroupOverrides(reviewSession, group.reviewGroupId))}>
-          Reset
-        </button>
-        {availableMergeTargets.length > 0 ? (
-          <select
-            aria-label={`Merge ${group.songFolderName}`}
-            defaultValue=""
-            onChange={(event) => {
-              if (event.target.value) {
-                onChange(mergeGroups(reviewSession, group.reviewGroupId, event.target.value));
-                event.target.value = '';
-              }
-            }}
-          >
-            <option value="">Merge into...</option>
-            {availableMergeTargets.map((targetGroup) => (
-              <option key={targetGroup.reviewGroupId} value={targetGroup.reviewGroupId}>
-                {targetGroup.songFolderName}
-              </option>
-            ))}
-          </select>
-        ) : null}
+      <div className="folder-preview">
+        <span className="field-label">{t('review.folderPreview')}</span>
+        <code>{group.artistName}/{group.songFolderName}</code>
       </div>
 
-      <div className="edit-grid">
+      <div className="edit-grid secondary-edit-grid">
         <label className="field">
-          <span>Artist folder</span>
+          <span>{t('review.artistFolder')}</span>
           <input
             value={group.artistName}
             onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
           />
         </label>
         <label className="field">
-          <span>Song folder</span>
+          <span>{t('review.songFolder')}</span>
           <input
             value={group.songFolderName}
             onChange={(event) => onChange(renameGroup(reviewSession, group.reviewGroupId, event.target.value))}
@@ -246,74 +187,36 @@ function ReviewGroupDetail({
         </label>
       </div>
 
-      {group.artistName !== group.originalGroup.artist || group.songFolderName !== group.originalGroup.canonicalSongTitle ? (
-        <p className="original-note">
-          Resolver: {group.originalGroup.artist} / {group.originalGroup.canonicalSongTitle}
-        </p>
-      ) : null}
-
-      <ReviewMetadata group={group} />
-
-      <ul className="candidate-list">
-        {group.files.map((file) => (
-          <li className={file.included ? undefined : 'excluded-file'} key={file.fileId}>
-            <label className="file-toggle">
-              <input
-                checked={file.included}
-                onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
-                type="checkbox"
-              />
-              <span>{file.included ? 'Included' : 'Excluded'}</span>
-            </label>
-            <label className="field file-name-field">
-              <span>Target file name</span>
-              <input
-                value={file.targetFilename}
-                onChange={(event) => onChange(renameFile(reviewSession, file.fileId, event.target.value))}
-              />
-            </label>
-            {file.targetFilename !== file.originalFilename ? <small>Original: {file.originalFilename}</small> : null}
-            <CandidateBadges file={file.originalFile} />
-            {group.files.length > 1 ? (
-              <button
-                type="button"
-                className="secondary compact-button"
-                onClick={() => onChange(splitGroup(reviewSession, group.reviewGroupId, [file.fileId]))}
-              >
-                Split to new group
-              </button>
-            ) : null}
-            {file.overrideWarnings.length > 0 ? (
-              <ul className="warning-list warning-list--file">
-                {file.overrideWarnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-            {file.warnings.length > 0 ? (
-              <ul className="warning-list warning-list--file">
-                {file.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-
-      {group.overrideWarnings.length > 0 ? (
-        <ul className="warning-list warning-list--group">
-          {group.overrideWarnings.map((warning) => (
-            <li key={warning}>{warning}</li>
+      <div>
+        <span className="field-label">{t('review.files')}</span>
+        <ul className="candidate-list">
+          {group.files.map((file) => (
+            <li className={file.included ? undefined : 'excluded-file'} key={file.fileId}>
+              <label className="file-toggle">
+                <input
+                  checked={file.included}
+                  onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
+                  type="checkbox"
+                />
+                <span>{file.targetFilename}</span>
+              </label>
+              {file.targetFilename !== file.originalFilename ? <small>{t('review.originalFileName')}: {file.originalFilename}</small> : null}
+              <label className="field file-name-field">
+                <span>{t('review.targetFileName')}</span>
+                <input
+                  value={file.targetFilename}
+                  onChange={(event) => onChange(renameFile(reviewSession, file.fileId, event.target.value))}
+                />
+              </label>
+              <CandidateBadges file={file.originalFile} />
+              {file.overrideWarnings.length > 0 ? <p className="user-note">This file name will be adjusted for your file system.</p> : null}
+            </li>
           ))}
         </ul>
-      ) : null}
-      {group.warnings.length > 0 ? (
-        <ul className="warning-list warning-list--group">
-          {group.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
+      </div>
+
+      {group.warnings.length > 0 || group.overrideWarnings.length > 0 ? (
+        <p className="user-note">Some metadata could not be verified.</p>
       ) : null}
     </section>
   );
@@ -323,19 +226,14 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
   const firstUpload = group.uploads[0];
 
   return (
-    <section className="upload-detail" aria-label="Selected upload details">
+    <section className="upload-detail" aria-label="Selected song files">
       <div className="group-heading">
         <div>
           <h2>{group.canonicalSongTitle}</h2>
           <span>by {group.artist}</span>
         </div>
-        <span className="source-badge">{group.metadataSource}</span>
       </div>
       <dl className="details compact">
-        <div>
-          <dt>Confidence</dt>
-          <dd>{group.confidence}</dd>
-        </div>
         <div>
           <dt>BPM</dt>
           <dd>{group.bpm ?? 'not specified'}</dd>
@@ -344,33 +242,7 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
           <dt>License</dt>
           <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
         </div>
-        <div>
-          <dt>Tags</dt>
-          <dd>{firstUpload && firstUpload.tags.length > 0 ? firstUpload.tags.join(', ') : 'not specified'}</dd>
-        </div>
       </dl>
-      {group.uploads.some((upload) => upload.title !== group.canonicalSongTitle) ? (
-        <div className="title-map">
-          <span className="field-label">Original upload titles</span>
-          <ul>
-            {group.uploads.map((upload) => (
-              <li key={upload.uploadId}>
-                <span>{upload.title}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {group.groupingReasons.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Grouping reasons</span>
-          <ul className="reason-list">
-            {group.groupingReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
       <ul className="candidate-list">
         {group.files.map((file) => (
           <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`}>
@@ -379,89 +251,74 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
           </li>
         ))}
       </ul>
-      {group.unverifiedFields.length > 0 ? <p className="unverified">Unverified: {group.unverifiedFields.join(', ')}</p> : null}
-      {group.ambiguousUploads.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Ambiguous uploads</span>
-          <ul className="reason-list">
-            {group.ambiguousUploads.map((upload) => (
-              <li key={upload.uploadId}>
-                {upload.title} ({upload.uploadId})
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {group.warnings.length > 0 ? (
-        <ul className="warning-list warning-list--group">
-          {group.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
-      ) : null}
     </section>
   );
 }
 
-function ReviewMetadata({ group }: { group: ReviewGroup }): JSX.Element {
-  const firstUpload = group.originalGroup.uploads[0];
-
+function CandidateBadges({ file }: { file: ReviewFile['originalFile'] }): JSX.Element {
   return (
-    <>
-      <dl className="details compact">
-        <div>
-          <dt>Confidence</dt>
-          <dd>{group.originalGroup.confidence}</dd>
-        </div>
-        <div>
-          <dt>BPM</dt>
-          <dd>{group.originalGroup.bpm ?? 'not specified'}</dd>
-        </div>
-        <div>
-          <dt>License</dt>
-          <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd>{group.originalGroup.metadataSource}</dd>
-        </div>
-      </dl>
-      {group.originalGroup.groupingReasons.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Grouping reasons</span>
-          <ul className="reason-list">
-            {group.originalGroup.groupingReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {group.originalGroup.ambiguousUploads.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Ambiguous uploads</span>
-          <ul className="reason-list">
-            {group.originalGroup.ambiguousUploads.map((upload) => (
-              <li key={upload.uploadId}>
-                {upload.title} ({upload.uploadId})
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </>
+    <div className="candidate-badges">
+      {fileBadges(file).map((badge) => (
+        <span className="candidate-badge" key={badge}>
+          {badge}
+        </span>
+      ))}
+    </div>
   );
 }
 
-function CandidateBadges({ file }: { file: ReviewFile['originalFile'] }): JSX.Element {
-  const classification = getDownloadCandidateClassification(file);
-  const label = `${classification.role} / ${classification.format} / ${classification.quality}`;
-  const title = classification.reasons.join(' ');
+function UploadCheckSection({
+  title,
+  body,
+  uploads
+}: {
+  title: string;
+  body: string;
+  uploads: ArtistCatalogUploadCheck[];
+}): JSX.Element | null {
+  if (uploads.length === 0) {
+    return null;
+  }
 
   return (
-    <div className="candidate-badges" title={title}>
-      <span className="candidate-badge">{label}</span>
-      <span className="candidate-badge confidence-badge">{classification.confidence}</span>
-      <span className="candidate-badge source-badge">{file.metadataSource}</span>
-    </div>
+    <details className="upload-check-section">
+      <summary>
+        {title} - {uploads.length} upload{uploads.length === 1 ? '' : 's'}
+      </summary>
+      <p>{body}</p>
+      <ul>
+        {uploads.map((item) => (
+          <li key={item.upload.uploadId}>
+            <span>{item.upload.title}</span>
+            <small>{item.upload.artistName}</small>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
+}
+
+function collectBadges(files: ReviewFile['originalFile'][]): string[] {
+  return [...new Set(files.flatMap(fileBadges))];
+}
+
+function fileBadges(file: ReviewFile['originalFile']): string[] {
+  const classification = getDownloadCandidateClassification(file);
+  const badges = new Set<string>();
+
+  if (classification.format !== 'other') {
+    badges.add(classification.format.toUpperCase());
+  }
+
+  if (classification.role === 'preview') {
+    badges.add('Preview');
+  } else if (classification.role === 'archive') {
+    badges.add('Archive');
+  } else if (classification.role === 'stem') {
+    badges.add('Stem');
+  } else if (classification.role === 'source') {
+    badges.add('Source');
+  }
+
+  return [...badges];
 }

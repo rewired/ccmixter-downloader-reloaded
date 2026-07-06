@@ -5,15 +5,19 @@ import {
   RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
   type ArtistCatalogPageResult,
   type ArtistCatalogState,
+  type ArtistCatalogScanPhase,
+  type ArtistCatalogUploadCheck,
   type StemGroup
 } from '../../../shared/domain';
 import { groupStemUploads } from '../grouping/stemGrouper';
 import type { GroupingUploadCandidate } from '../grouping/groupingTypes';
+import { buildGroupingCandidates } from './ccmixterResolver';
 import { ARTIST_CATALOG_QUERY_LIMIT, describeArtistCatalogApiFailure } from './ccmixterApiClient';
 import type {
   CcmixterApiUploadMapping,
   CcmixterArtistCatalogPage,
-  CcmixterHtmlCatalogResult
+  CcmixterHtmlCatalogResult,
+  CcmixterHtmlEnrichment
 } from './ccmixterTypes';
 
 const EVIDENCE_TAG_HINTS = new Set([
@@ -34,6 +38,11 @@ const MAX_RECOVERY_ATTEMPTS = 3;
 // load session gets a much higher ceiling so it can actually reach large totalCounts; this remains
 // a hard stop only to guard against a runaway/broken pagination source, not an expected catalog size.
 const ARTIST_CATALOG_SESSION_MAX_PAGES = 500;
+const UPLOAD_ENRICHMENT_CONCURRENCY = 4;
+
+type EnrichmentCacheEntry =
+  | { ok: true; enrichment: CcmixterHtmlEnrichment }
+  | { ok: false; warnings: string[] };
 
 interface InternalSession {
   sessionId: string;
@@ -43,12 +52,18 @@ interface InternalSession {
   nextOffset: number;
   nextPageUrl?: string;
   seenUploadIds: Set<string>;
+  checkedUploadIds: Set<string>;
   loadedGroups: StemGroup[];
+  noFilesFoundUploads: ArtistCatalogUploadCheck[];
+  couldNotCheckFilesUploads: ArtistCatalogUploadCheck[];
   totalCount?: number;
   hasMore: boolean;
   pageCount: number;
   pagingIncomplete: boolean;
   isLoadingMore: boolean;
+  scanPhase: ArtistCatalogScanPhase;
+  cancelRequested: boolean;
+  enrichmentCache: Map<string, EnrichmentCacheEntry>;
   sessionWarnings: string[];
   consecutiveDuplicatePages: number;
   consecutiveEmptyPages: number;
@@ -67,6 +82,7 @@ export class ArtistCatalogSessionManager {
       totalCount?: number;
       warnings: string[];
     }>;
+    enrichUploadPage?(sourceUrl: string): Promise<CcmixterHtmlEnrichment>;
   };
 
   constructor(dependencies: {
@@ -81,6 +97,7 @@ export class ArtistCatalogSessionManager {
         totalCount?: number;
         warnings: string[];
       }>;
+      enrichUploadPage?(sourceUrl: string): Promise<CcmixterHtmlEnrichment>;
     };
   }) {
     this.apiClient = dependencies.apiClient;
@@ -209,7 +226,6 @@ export class ArtistCatalogSessionManager {
       }
 
       const seenUploadIds = new Set(firstPage.mappings.map((m) => m.upload.uploadId));
-      const groups = this.mappingsToGroups(firstPage.mappings, effectiveLogin);
       const hasMore = computeHasMore(seenUploadIds.size, totalCount, sourceKind, nextPageUrl, firstPage.mappings.length > 0);
 
       const session: InternalSession = {
@@ -220,18 +236,28 @@ export class ArtistCatalogSessionManager {
         nextOffset: firstPage.mappings.length,
         nextPageUrl,
         seenUploadIds,
-        loadedGroups: groups,
+        checkedUploadIds: new Set<string>(),
+        loadedGroups: [],
+        noFilesFoundUploads: [],
+        couldNotCheckFilesUploads: [],
         totalCount,
         hasMore,
         pageCount: 1,
         pagingIncomplete: false,
-        isLoadingMore: false,
+        isLoadingMore: true,
+        scanPhase: 'files',
+        cancelRequested: false,
+        enrichmentCache: new Map<string, EnrichmentCacheEntry>(),
         sessionWarnings,
         consecutiveDuplicatePages: 0,
         consecutiveEmptyPages: 0
       };
 
       this.sessions.set(sessionId, session);
+      const firstResult = await this.enrichMappings(session, firstPage.mappings);
+      session.loadedGroups = firstResult.groups;
+      session.isLoadingMore = false;
+      session.scanPhase = session.cancelRequested ? 'cancelled' : session.hasMore ? 'pages' : 'done';
 
       return {
         ok: true,
@@ -251,7 +277,17 @@ export class ArtistCatalogSessionManager {
       return { ok: false, error: `Catalog session ${sessionId} not found.` };
     }
 
+    if (session.cancelRequested) {
+      session.scanPhase = 'cancelled';
+      session.hasMore = false;
+      return {
+        ok: true,
+        value: sessionToPageResult(session)
+      };
+    }
+
     if (!session.hasMore) {
+      session.scanPhase = session.scanPhase === 'cancelled' ? 'cancelled' : 'done';
       return {
         ok: true,
         value: sessionToPageResult(session)
@@ -275,6 +311,7 @@ export class ArtistCatalogSessionManager {
     }
 
     session.isLoadingMore = true;
+    session.scanPhase = 'pages';
 
     try {
       let newMappings: CcmixterApiUploadMapping[] = [];
@@ -297,6 +334,7 @@ export class ArtistCatalogSessionManager {
           } else {
             session.hasMore = false;
             session.isLoadingMore = false;
+            session.scanPhase = session.cancelRequested ? 'cancelled' : 'done';
             return {
               ok: true,
               value: sessionToPageResult(session)
@@ -322,6 +360,7 @@ export class ArtistCatalogSessionManager {
             if (!isKnownIncomplete(session)) {
               session.hasMore = false;
               session.isLoadingMore = false;
+              session.scanPhase = session.cancelRequested ? 'cancelled' : 'done';
               return {
                 ok: true,
                 value: sessionToPageResult(session)
@@ -332,6 +371,7 @@ export class ArtistCatalogSessionManager {
               session.pagingIncomplete = true;
               session.hasMore = false;
               session.isLoadingMore = false;
+              session.scanPhase = session.cancelRequested ? 'cancelled' : 'done';
               return {
                 ok: true,
                 value: sessionToPageResult(session)
@@ -341,6 +381,7 @@ export class ArtistCatalogSessionManager {
             // HTML next link again, or drops through to the API-switch branch above once the HTML
             // link disappears) before giving up and marking the session incomplete.
             session.isLoadingMore = false;
+            session.scanPhase = session.cancelRequested ? 'cancelled' : 'pages';
             return {
               ok: true,
               value: sessionToPageResult(session)
@@ -354,6 +395,17 @@ export class ArtistCatalogSessionManager {
       if (newMappings.length === 0) {
         session.hasMore = false;
         session.isLoadingMore = false;
+        session.scanPhase = session.cancelRequested ? 'cancelled' : 'done';
+        return {
+          ok: true,
+          value: sessionToPageResult(session)
+        };
+      }
+
+      if (session.cancelRequested) {
+        session.hasMore = false;
+        session.isLoadingMore = false;
+        session.scanPhase = 'cancelled';
         return {
           ok: true,
           value: sessionToPageResult(session)
@@ -364,7 +416,9 @@ export class ArtistCatalogSessionManager {
         session.seenUploadIds.add(mapping.upload.uploadId);
       }
 
-      const newGroups = this.mappingsToGroups(newMappings, session.artistLogin);
+      session.scanPhase = 'files';
+      const enrichmentResult = await this.enrichMappings(session, newMappings);
+      const newGroups = enrichmentResult.groups;
       session.loadedGroups = [...session.loadedGroups, ...newGroups];
       session.pageCount += 1;
       session.hasMore = computeHasMore(
@@ -376,6 +430,7 @@ export class ArtistCatalogSessionManager {
       );
 
       session.isLoadingMore = false;
+      session.scanPhase = session.cancelRequested ? 'cancelled' : session.hasMore ? 'pages' : 'done';
 
       return {
         ok: true,
@@ -383,10 +438,145 @@ export class ArtistCatalogSessionManager {
       };
     } catch (error) {
       session.isLoadingMore = false;
+      session.scanPhase = 'error';
       return {
         ok: false,
         error: error instanceof Error ? error.message : 'Catalog load-more failed.'
       };
+    }
+  }
+
+  cancelSession(sessionId: string): { ok: true; value: ArtistCatalogPageResult } | { ok: false; error: string } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { ok: false, error: `Catalog session ${sessionId} not found.` };
+    }
+
+    session.cancelRequested = true;
+    session.hasMore = false;
+    session.scanPhase = 'cancelled';
+
+    return {
+      ok: true,
+      value: sessionToPageResult(session)
+    };
+  }
+
+  private async enrichMappings(
+    session: InternalSession,
+    mappings: CcmixterApiUploadMapping[]
+  ): Promise<{ groups: StemGroup[] }> {
+    const groups: StemGroup[] = [];
+    let index = 0;
+
+    const worker = async (): Promise<void> => {
+      while (index < mappings.length && !session.cancelRequested) {
+        const mapping = mappings[index];
+        index += 1;
+
+        if (!mapping) {
+          continue;
+        }
+
+        const result = await this.enrichMapping(session, mapping);
+        if (session.cancelRequested) {
+          continue;
+        }
+
+        session.checkedUploadIds.add(mapping.upload.uploadId);
+
+        if (result.groups.length > 0) {
+          groups.push(...result.groups);
+          continue;
+        }
+
+        if (result.status === 'no-files-found') {
+          addUploadCheck(session.noFilesFoundUploads, {
+            upload: mapping.upload,
+            status: 'no-files-found',
+            warnings: result.warnings
+          });
+        } else {
+          addUploadCheck(session.couldNotCheckFilesUploads, {
+            upload: mapping.upload,
+            status: 'could-not-check-files',
+            warnings: result.warnings
+          });
+        }
+      }
+    };
+
+    const workerCount = Math.min(UPLOAD_ENRICHMENT_CONCURRENCY, mappings.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    return { groups };
+  }
+
+  private async enrichMapping(
+    session: InternalSession,
+    mapping: CcmixterApiUploadMapping
+  ): Promise<{ groups: StemGroup[]; status?: ArtistCatalogUploadCheck['status']; warnings: string[] }> {
+    const cacheKey = mapping.upload.sourceUrl || mapping.upload.uploadId;
+    const cached = session.enrichmentCache.get(cacheKey) ?? await this.fetchAndCacheEnrichment(session, cacheKey, mapping.upload.sourceUrl);
+    const enrichments = cached.ok ? [cached.enrichment] : [];
+    const candidates = buildGroupingCandidates([mapping], enrichments);
+    const groups = this.candidatesToGroups(candidates, session.artistLogin).filter((group) => group.files.length > 0);
+
+    if (groups.length > 0) {
+      return {
+        groups: cached.ok
+          ? groups
+          : groups.map((group) => ({
+              ...group,
+              warnings: [...group.warnings, ...cached.warnings].filter(unique)
+            })),
+        warnings: cached.ok ? [] : cached.warnings
+      };
+    }
+
+    return {
+      groups: [],
+      status: cached.ok ? 'no-files-found' : 'could-not-check-files',
+      warnings: cached.ok ? cached.enrichment.warnings : cached.warnings
+    };
+  }
+
+  private async fetchAndCacheEnrichment(
+    session: InternalSession,
+    cacheKey: string,
+    sourceUrl: string
+  ): Promise<EnrichmentCacheEntry> {
+    const htmlClient = this.htmlClient;
+
+    if (!htmlClient?.enrichUploadPage) {
+      const entry: EnrichmentCacheEntry = {
+        ok: false,
+        warnings: [`Could not check upload page ${sourceUrl}: HTML upload-page enrichment is not available.`]
+      };
+      session.enrichmentCache.set(cacheKey, entry);
+      return entry;
+    }
+
+    try {
+      const enrichment = await htmlClient.enrichUploadPage(sourceUrl);
+      const entry: EnrichmentCacheEntry = { ok: true, enrichment };
+      if (!session.cancelRequested) {
+        session.enrichmentCache.set(cacheKey, entry);
+      }
+      return entry;
+    } catch (error) {
+      const entry: EnrichmentCacheEntry = {
+        ok: false,
+        warnings: [
+          error instanceof Error
+            ? `Could not check upload page ${sourceUrl}: ${error.message}`
+            : `Could not check upload page ${sourceUrl}.`
+        ]
+      };
+      if (!session.cancelRequested) {
+        session.enrichmentCache.set(cacheKey, entry);
+      }
+      return entry;
     }
   }
 
@@ -452,12 +642,7 @@ export class ArtistCatalogSessionManager {
     return this.loadMoreFromApiWithRecovery(session);
   }
 
-  private mappingsToGroups(mappings: CcmixterApiUploadMapping[], artistLogin: string): StemGroup[] {
-    const candidates: GroupingUploadCandidate[] = mappings.map((m) => ({
-      upload: m.upload,
-      files: m.files
-    }));
-
+  private candidatesToGroups(candidates: GroupingUploadCandidate[], _artistLogin: string): StemGroup[] {
     const groups = candidates.flatMap((candidate) => {
       const result = groupStemUploads([candidate]);
       const group = result.groups[0];
@@ -542,6 +727,8 @@ function mergeMappingsByUploadId(mappings: CcmixterApiUploadMapping[]): Ccmixter
 }
 
 function sessionToState(session: InternalSession): ArtistCatalogState {
+  const downloadableFileCount = countDownloadableFiles(session.loadedGroups);
+
   return {
     sessionId: session.sessionId,
     artistLogin: session.artistLogin,
@@ -550,6 +737,15 @@ function sessionToState(session: InternalSession): ArtistCatalogState {
     groups: session.loadedGroups,
     loadedCount: session.seenUploadIds.size,
     totalCount: session.totalCount,
+    checkedUploadCount: session.checkedUploadIds.size,
+    totalUploadCount: session.totalCount,
+    downloadableGroupCount: session.loadedGroups.length,
+    downloadableFileCount,
+    noFilesFoundCount: session.noFilesFoundUploads.length,
+    couldNotCheckFilesCount: session.couldNotCheckFilesUploads.length,
+    noFilesFoundUploads: session.noFilesFoundUploads,
+    couldNotCheckFilesUploads: session.couldNotCheckFilesUploads,
+    scanPhase: session.scanPhase,
     hasMore: session.hasMore,
     isLoadingMore: session.isLoadingMore,
     pagingIncomplete: session.pagingIncomplete,
@@ -562,15 +758,44 @@ function sessionToState(session: InternalSession): ArtistCatalogState {
 }
 
 function sessionToPageResult(session: InternalSession): ArtistCatalogPageResult {
+  const downloadableFileCount = countDownloadableFiles(session.loadedGroups);
+
   return {
     sessionId: session.sessionId,
     groups: session.loadedGroups,
     loadedCount: session.seenUploadIds.size,
     totalCount: session.totalCount,
+    checkedUploadCount: session.checkedUploadIds.size,
+    totalUploadCount: session.totalCount,
+    downloadableGroupCount: session.loadedGroups.length,
+    downloadableFileCount,
+    noFilesFoundCount: session.noFilesFoundUploads.length,
+    couldNotCheckFilesCount: session.couldNotCheckFilesUploads.length,
+    noFilesFoundUploads: session.noFilesFoundUploads,
+    couldNotCheckFilesUploads: session.couldNotCheckFilesUploads,
+    scanPhase: session.scanPhase,
     hasMore: session.hasMore,
     pagingIncomplete: session.pagingIncomplete,
     warnings: [
       ...(session.pagingIncomplete ? [ARTIST_SCAN_PAGINATION_WARNING] : [])
     ]
   };
+}
+
+function countDownloadableFiles(groups: StemGroup[]): number {
+  return groups.reduce((sum, group) => sum + group.files.length, 0);
+}
+
+function addUploadCheck(items: ArtistCatalogUploadCheck[], item: ArtistCatalogUploadCheck): void {
+  const existingIndex = items.findIndex((candidate) => candidate.upload.uploadId === item.upload.uploadId);
+  if (existingIndex >= 0) {
+    items[existingIndex] = item;
+    return;
+  }
+
+  items.push(item);
+}
+
+function unique<T>(value: T, index: number, all: T[]): boolean {
+  return all.indexOf(value) === index;
 }

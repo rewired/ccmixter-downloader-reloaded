@@ -16,6 +16,7 @@ This subtree contains typed IPC channels, request shapes, response shapes, and s
 * Do not define synchronous IPC contracts.
 * Keep request and response types explicit and narrow.
 * IPC changes are security-relevant and require review against preload exposure.
+* Artist catalog IPC remains narrow: start, load more, and cancel by session ID.
 
 ## Work Guidance
 

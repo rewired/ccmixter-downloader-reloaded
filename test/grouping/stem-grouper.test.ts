@@ -216,9 +216,9 @@ describe('groupStemUploads', () => {
       }
     );
 
-    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Wiseman/Boxcar heading West (145 bpm)/GUITAR-main-.flac');
+    expect(plan.plannedFiles[0]?.targetRelativePath).toBe('Wiseman/Boxcar heading West (145 BPM)/GUITAR-main-.flac');
     expect(plan.plannedFiles[0]?.targetAbsolutePath).toBe(
-      'D:/Stem Library/Wiseman/Boxcar heading West (145 bpm)/GUITAR-main-.flac'
+      'D:/Stem Library/Wiseman/Boxcar heading West (145 BPM)/GUITAR-main-.flac'
     );
   });
 });

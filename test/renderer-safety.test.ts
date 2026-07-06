@@ -31,26 +31,40 @@ describe('renderer safety', () => {
     expect(violations).toEqual([]);
   });
 
-  it('renders artist catalog reality-check copy and scan counts from shared renderer state', async () => {
+  it('renders musician-facing artist scan progress and counts from shared renderer state', async () => {
     const source = await readAllRendererSource();
 
-    expect(source).toContain('ARTIST_SCAN_REALITY_CHECK_WARNING');
-    expect(source).toContain('Review artist uploads');
-    expect(source).toContain('Loaded uploads');
-    expect(source).toContain('Total uploads');
-    expect(source).toContain('Has more');
-    expect(source).toContain('Planned files');
-    expect(source).toContain('Included files');
-    expect(source).toContain('Loading more uploads');
-    expect(source).toContain('uploads loaded');
-    expect(source).toContain('More uploads available');
+    expect(source).toContain('Reading artist catalog...');
+    expect(source).toContain('Checking upload pages...');
+    expect(source).toContain('Finding downloadable files...');
+    expect(source).toContain('No files found');
+    expect(source).toContain('Could not check files');
+    expect(source).toContain('checkedUploadCount');
+    expect(source).toContain('downloadableFileCount');
+    expect(source).toContain('noFilesFoundCount');
+    expect(source).toContain('couldNotCheckFilesCount');
     expect(source).toContain('resolveArtistCatalogStatus');
     expect(source).toContain('resolveArtistCatalogCounts');
     expect(source).toContain('isArtistCatalogInput');
-    expect(source).toContain('Include recommended source/stem/archive files');
-    expect(source).toContain('Exclude previews');
-    expect(source).toContain('Exclude archives');
-    expect(source).toContain('Clear all included files');
+    expect(source).not.toContain('Include recommended source/stem/archive files');
+    expect(source).not.toContain('Exclude previews');
+    expect(source).not.toContain('Exclude archives');
+    expect(source).not.toContain('Clear all included files');
+  });
+
+  it('keeps developer terms out of the main source and review flow', async () => {
+    const source = await readRendererSourceFiles([
+      'src/renderer/ui/SourcePanel.tsx',
+      'src/renderer/ui/UploadListDetail.tsx',
+      'src/renderer/ui/DownloadPanel.tsx',
+      'src/renderer/ui/StatusBar.tsx'
+    ]);
+
+    expect(source).not.toContain('Developer actions');
+    expect(source).not.toContain('Merge into');
+    expect(source).not.toContain('Confidence');
+    expect(source).not.toContain('Grouping reasons');
+    expect(source).not.toContain('source mode');
   });
 
   it('renders archive preview controls and warning states from shared renderer state', async () => {
@@ -83,6 +97,11 @@ describe('renderer safety', () => {
 async function readAllRendererSource(): Promise<string> {
   const files = await collectRendererSourceFiles(path.resolve('src/renderer'));
   const contents = await Promise.all(files.map((file) => readFile(file, 'utf8')));
+  return contents.join('\n');
+}
+
+async function readRendererSourceFiles(files: string[]): Promise<string> {
+  const contents = await Promise.all(files.map((file) => readFile(path.resolve(file), 'utf8')));
   return contents.join('\n');
 }
 

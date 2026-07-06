@@ -15,11 +15,14 @@ This subtree contains shared domain models for ccMixter uploads, licenses, archi
 * License-related fields must not silently imply commercial allowance or reuse permission.
 * Unknown or missing API data must be represented explicitly.
 * Domain models used by IPC or tests are public contracts.
+* Review sessions include every discovered downloadable file by default for all input kinds.
+* Artist catalog progress separates downloadable uploads, no-files-found uploads, and could-not-check uploads.
 
 ## Work Guidance
 
 * Keep domain types implementation-neutral.
 * Update fixtures and tests when domain parsing expectations change.
+* Missing BPM remains optional metadata and must not block target path planning.
 
 ## Verification
 

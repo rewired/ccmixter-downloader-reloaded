@@ -1,49 +1,47 @@
+import { t } from '../i18n';
+
 type Status = 'idle' | 'loading' | 'error';
 
 export function SourcePanel({
   rawInput,
   onRawInputChange,
   onScanSource,
-  onParseInput,
-  onResolveMetadata,
+  onCancelScan,
   canScan,
+  canCancelScan,
   status
 }: {
   rawInput: string;
   onRawInputChange: (value: string) => void;
   onScanSource: () => void;
-  onParseInput: () => void;
-  onResolveMetadata: () => void;
+  onCancelScan: () => void;
   canScan: boolean;
+  canCancelScan: boolean;
   status: Status;
 }): JSX.Element {
   return (
     <section className="source-panel">
+      <h2>{t('source.title')}</h2>
       <div className="source-panel__row">
         <label className="field">
-          <span>ccMixter source</span>
+          <span>{t('source.inputLabel')}</span>
           <input
             value={rawInput}
             onChange={(event) => onRawInputChange(event.target.value)}
-            placeholder="Paste a ccMixter artist link, upload link, or upload ID"
+            placeholder={t('source.placeholder')}
           />
         </label>
-        <button type="button" onClick={onScanSource} disabled={!canScan}>
-          Scan source
-        </button>
-      </div>
-
-      <details className="source-panel__dev-actions">
-        <summary>Developer actions</summary>
-        <div className="source-panel__dev-buttons">
-          <button type="button" className="secondary" onClick={onParseInput} disabled={status === 'loading'}>
-            Parse input
+        <div className="source-panel__actions">
+          <button type="button" onClick={onScanSource} disabled={!canScan}>
+            {t('scan.button')}
           </button>
-          <button type="button" className="secondary" onClick={onResolveMetadata} disabled={status === 'loading'}>
-            Resolve metadata
-          </button>
+          {canCancelScan ? (
+            <button type="button" className="secondary" onClick={onCancelScan} disabled={status !== 'loading'}>
+              {t('scan.cancel')}
+            </button>
+          ) : null}
         </div>
-      </details>
+      </div>
     </section>
   );
 }

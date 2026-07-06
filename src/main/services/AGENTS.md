@@ -16,11 +16,13 @@ This subtree contains Main Process service modules for ccMixter access, download
 * Do not assume missing ccMixter API fields or license values; model unknowns explicitly.
 * Download and license data persistence must remain in Main Process services.
 * External network communication must have basic error handling.
+* Artist catalog scans enrich upload pages in the Main Process with bounded concurrency, cache enrichment within a session, and keep per-upload failures recoverable.
 
 ## Work Guidance
 
 * Keep service-domain boundaries clear: archive, ccmixter, download, and grouping concerns should not bleed into Renderer code.
 * Prefer fixture-backed tests for API parsing and license-sensitive behavior.
+* Preserve partial artist catalog scan results when a scan is cancelled.
 
 ## Verification
 

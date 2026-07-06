@@ -32,4 +32,5 @@ This subtree contains React Renderer code, browser UI state, styles, and present
 ## Child DOX Index
 
 * `ui/AGENTS.md` covers Renderer UI components and local UI helper modules.
+* `i18n/AGENTS.md` covers renderer-side English strings and the typed translation helper.
 * `index.html`, `index.tsx`, `styles.css`, and `global.d.ts` remain owned by this file.

@@ -339,6 +339,21 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.artistCatalogCancel,
+    async (_event, sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>> => {
+      try {
+        const result = catalogSessionManager.cancelSession(sessionId);
+        if (!result.ok) {
+          return errorResult('ARTIST_CATALOG_CANCEL_FAILED', result.error, true);
+        }
+        return { ok: true, value: result.value };
+      } catch (error) {
+        return errorResult('ARTIST_CATALOG_CANCEL_FAILED', 'Artist catalog scan could not be cancelled.', true, error);
+      }
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.previewArchiveDownload,
     async (_event, jobId: string, fileJobId: string): Promise<IpcResult<ArchivePreview>> => {
       try {

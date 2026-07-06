@@ -1,5 +1,6 @@
-import type { MetadataSourceType, StemLibraryRoot } from '../../shared/domain';
-import { resolveArtistCatalogStatus, resolveStatusBarRootLabel, type ArtistCatalogCounts } from './catalogStatus';
+import type { ArtistCatalogScanPhase, StemLibraryRoot } from '../../shared/domain';
+import { t } from '../i18n';
+import { resolveStatusBarRootLabel, type ArtistCatalogCounts } from './catalogStatus';
 
 type Status = 'idle' | 'loading' | 'error';
 
@@ -8,36 +9,32 @@ export function StatusBar({
   onChooseRoot,
   isArtistCatalog,
   catalogCounts,
-  catalogIsLoadingMore,
-  hasMore,
-  pagingIncomplete,
-  sourceMode,
+  scanPhase,
   plannedFileCount,
-  status
+  downloadStatus
 }: {
   stemLibraryRoot: StemLibraryRoot | null;
   onChooseRoot: () => void;
   isArtistCatalog: boolean;
   catalogCounts: ArtistCatalogCounts | null;
-  catalogIsLoadingMore: boolean;
-  hasMore: boolean;
-  pagingIncomplete: boolean;
-  sourceMode: MetadataSourceType | null;
+  scanPhase: ArtistCatalogScanPhase;
   plannedFileCount: number;
+  downloadStatus: 'dry-run' | 'ready' | 'downloading';
   status: Status;
 }): JSX.Element {
   const rootLabel = resolveStatusBarRootLabel(stemLibraryRoot);
-  const catalogStatusText = catalogCounts
-    ? resolveArtistCatalogStatus(hasMore, catalogCounts.loadedCount, catalogCounts.totalCount, catalogIsLoadingMore, pagingIncomplete)
-    : null;
-
-  const infoText = !stemLibraryRoot
-    ? 'Choose a folder before creating a dry run'
-    : isArtistCatalog && catalogCounts
-      ? `${catalogCounts.loadedCount}${typeof catalogCounts.totalCount === 'number' ? ` of ${catalogCounts.totalCount}` : ''} uploads loaded`
-      : plannedFileCount > 0
-        ? `${plannedFileCount} planned file${plannedFileCount === 1 ? '' : 's'}`
-        : 'No plan yet';
+  const progressText = isArtistCatalog && catalogCounts ? resolveProgressText(scanPhase, catalogCounts) : null;
+  const foundText =
+    catalogCounts && catalogCounts.downloadableGroupCount > 0
+      ? `Found ${catalogCounts.downloadableGroupCount} song${catalogCounts.downloadableGroupCount === 1 ? '' : 's'} - ${catalogCounts.downloadableFileCount} file${catalogCounts.downloadableFileCount === 1 ? '' : 's'}`
+      : null;
+  const selectedText = plannedFileCount > 0 ? `${plannedFileCount} file${plannedFileCount === 1 ? '' : 's'} selected` : null;
+  const stateText =
+    downloadStatus === 'downloading'
+      ? t('status.downloading')
+      : downloadStatus === 'dry-run'
+        ? t('status.dryRun')
+        : t('status.ready');
 
   return (
     <footer className="status-bar" role="contentinfo">
@@ -45,24 +42,46 @@ export function StatusBar({
         type="button"
         className="status-bar__root-button"
         onClick={onChooseRoot}
-        disabled={status === 'loading'}
         title={stemLibraryRoot?.path ?? undefined}
-        aria-label={
-          stemLibraryRoot ? `Stem library root: ${stemLibraryRoot.path}. Click to change folder.` : 'Choose stem library root folder'
-        }
+        aria-label={stemLibraryRoot ? `Download folder: ${stemLibraryRoot.path}. Click to change folder.` : t('status.chooseFolder')}
       >
         <span className="status-bar__root-icon" aria-hidden="true">
-          {stemLibraryRoot ? '📁' : '⚠️'}
+          {stemLibraryRoot ? 'Folder' : 'Choose'}
         </span>
         <span className={`status-bar__root-path${stemLibraryRoot ? '' : ' unset'}`}>{rootLabel}</span>
       </button>
 
       <div className="status-bar__info">
-        <span>{infoText}</span>
-        {stemLibraryRoot && catalogStatusText ? <span>{catalogStatusText}</span> : null}
-        {sourceMode ? <span>Source: {sourceMode}</span> : null}
-        <span className="status-bar__note">Dry-run only</span>
+        {progressText ? <span>{progressText}</span> : null}
+        {foundText ? <span>{foundText}</span> : null}
+        {selectedText ? <span>{selectedText}</span> : null}
+        <span className="status-bar__note">{stateText}</span>
       </div>
     </footer>
   );
+}
+
+function resolveProgressText(scanPhase: ArtistCatalogScanPhase, counts: ArtistCatalogCounts): string {
+  if (scanPhase === 'catalog') {
+    return t('scan.catalog');
+  }
+
+  if (scanPhase === 'pages' || scanPhase === 'files') {
+    const total = counts.totalUploadCount ?? counts.totalCount;
+    return `${t('scan.pages')} ${counts.checkedUploadCount}${typeof total === 'number' ? ` of ${total}` : ''}`;
+  }
+
+  if (scanPhase === 'planning') {
+    return t('scan.planning');
+  }
+
+  if (scanPhase === 'cancelled') {
+    return t('scan.cancelled');
+  }
+
+  if (counts.loadedCount > 0) {
+    return `${counts.loadedCount} upload${counts.loadedCount === 1 ? '' : 's'} checked`;
+  }
+
+  return t('status.ready');
 }

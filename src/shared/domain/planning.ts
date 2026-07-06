@@ -132,7 +132,7 @@ export function sanitizePathSegment(value: string): string {
 
 export function buildSongFolderName(title: string, bpm?: number): string {
   const safeTitle = sanitizePathSegment(normalizeSongTitle(title));
-  return typeof bpm === 'number' ? `${safeTitle} (${bpm} bpm)` : safeTitle;
+  return typeof bpm === 'number' ? `${safeTitle} (${bpm} BPM)` : safeTitle;
 }
 
 export function buildPlannedTargetPath(group: StemGroup, file: TrackFile): string {

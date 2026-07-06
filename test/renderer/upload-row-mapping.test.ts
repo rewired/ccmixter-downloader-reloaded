@@ -14,11 +14,11 @@ describe('upload row mapping', () => {
       artist: 'Wiseman',
       bpm: 145,
       license: 'Attribution Noncommercial 4.0',
-      sourceMode: 'api',
       fileCount: 2,
-      warningCount: 1
+      badges: ['FLAC', 'Stem', 'MP3', 'Preview']
     });
     expect(row).not.toHaveProperty('tags');
+    expect(row).not.toHaveProperty('sourceMode');
   });
 
   it('maps a review group to a compact row counting only included files and combined warnings', () => {
@@ -33,13 +33,14 @@ describe('upload row mapping', () => {
     const row = toReviewRow(session.groups[0]!);
 
     expect(row.id).toBe(session.groups[0]!.reviewGroupId);
-    expect(row.title).toBe('Boxcar heading West (145 bpm)');
+    expect(row.title).toBe('Boxcar heading West (145 BPM)');
     expect(row.artist).toBe('Wiseman');
     expect(row.bpm).toBe(145);
     expect(row.fileCount).toBe(2);
-    expect(row.warningCount).toBe(1);
-    expect(row.status).toBe('needs-review');
+    expect(row.badges).toEqual(['FLAC', 'Stem', 'MP3', 'Preview']);
     expect(row).not.toHaveProperty('tags');
+    expect(row).not.toHaveProperty('warningCount');
+    expect(row).not.toHaveProperty('status');
   });
 });
 

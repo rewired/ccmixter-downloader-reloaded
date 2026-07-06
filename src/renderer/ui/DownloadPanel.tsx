@@ -1,5 +1,6 @@
 import { summarizeDownloadJob } from '../../shared/domain';
 import type { ArchivePreview, DownloadJob, DownloadQueueState, DownloadResult } from '../../shared/domain';
+import { t } from '../i18n';
 
 type Status = 'idle' | 'loading' | 'error';
 
@@ -8,13 +9,15 @@ export function DownloadPanel({
   advisorySummary,
   advisoryValidationOk,
   canPrepareDownload,
+  hasDownloadFolder,
+  songCount,
   downloadJob,
   downloadQueueState,
   downloadResult,
   archivePreviews,
   archivePreviewErrors,
-  isArtistCatalog,
   onCancel,
+  onChooseDownloadFolder,
   onConfirm,
   onPrepare,
   onPreviewArchive,
@@ -24,13 +27,15 @@ export function DownloadPanel({
   advisorySummary: ReturnType<typeof summarizeDownloadJob>;
   advisoryValidationOk: boolean;
   canPrepareDownload: boolean;
+  hasDownloadFolder: boolean;
+  songCount: number;
   downloadJob: DownloadJob | null;
   downloadQueueState: DownloadQueueState | null;
   downloadResult: DownloadResult | null;
   archivePreviews: Record<string, ArchivePreview>;
   archivePreviewErrors: Record<string, string>;
-  isArtistCatalog: boolean;
   onCancel: (jobId: string) => void;
+  onChooseDownloadFolder: () => void;
   onConfirm: (jobId: string) => void;
   onPrepare: () => void;
   onPreviewArchive: (jobId: string, fileJobId: string) => void;
@@ -45,59 +50,42 @@ export function DownloadPanel({
     downloadJob.errors.length === 0 &&
     status !== 'loading';
   const isRunning = downloadQueueState?.status === 'running';
+  const primaryLabel = !hasDownloadFolder
+    ? t('download.chooseFolder')
+    : downloadJob
+      ? t('download.start')
+      : t('download.prepare');
+  const primaryAction = !hasDownloadFolder
+    ? onChooseDownloadFolder
+    : downloadJob
+      ? () => onConfirm(downloadJob.jobId)
+      : onPrepare;
+  const primaryDisabled = hasDownloadFolder && (downloadJob ? !canConfirm : !canPrepareDownload);
 
   return (
-    <section className="download-panel" aria-label="Download confirmation and progress">
+    <section className="download-panel" aria-label="Download">
       <div className="download-heading">
         <div>
-          <h3>Download</h3>
-          <span>{summary.writableFiles} writable file(s)</span>
+          <h3>{t('download.title')}</h3>
+          <span>
+            {summary.writableFiles} {t('download.selectedFiles')} - {songCount} {t('download.songs')}
+          </span>
         </div>
-        <span className={`source-badge status-${downloadQueueState?.status ?? downloadJob?.status ?? 'queued'}`}>
-          {downloadQueueState?.status ?? downloadJob?.status ?? 'not prepared'}
-        </span>
       </div>
 
-      <dl className="details compact">
-        <div>
-          <dt>Target root</dt>
-          <dd>{summary.targetRoot}</dd>
-        </div>
-        <div>
-          <dt>Skipped</dt>
-          <dd>{summary.skippedFiles}</dd>
-        </div>
-        <div>
-          <dt>Blocked files</dt>
-          <dd>{summary.blockedFiles}</dd>
-        </div>
-        <div>
-          <dt>Warnings</dt>
-          <dd>{summary.warnings.length}</dd>
-        </div>
-        <div>
-          <dt>Blocking errors</dt>
-          <dd>{advisoryValidationOk ? summary.errors.length : 'blocking'}</dd>
-        </div>
-      </dl>
+      <div className="download-summary">
+        <span>{t('download.folderInStatus')}</span>
+        <span>{t('download.noWriteUntilStart')}</span>
+      </div>
 
       <div className="download-actions">
-        <button type="button" onClick={onPrepare} disabled={!canPrepareDownload}>
-          {isArtistCatalog ? 'Prepare selected uploads' : 'Start Download'}
-        </button>
-        <button type="button" className="secondary" onClick={() => onConfirm(downloadJob!.jobId)} disabled={!canConfirm}>
-          Confirm Download
+        <button type="button" onClick={primaryAction} disabled={primaryDisabled}>
+          {primaryLabel}
         </button>
         <button type="button" className="secondary" onClick={() => onCancel(downloadQueueState!.jobId)} disabled={!isRunning}>
-          Cancel
+          {t('download.cancel')}
         </button>
       </div>
-
-      {downloadJob && !downloadQueueState ? (
-        <p className="confirmation-note">
-          Confirm to write {summary.writableFiles} file(s) under {downloadJob.stemLibraryRootPath}.
-        </p>
-      ) : null}
 
       <ul className="path-list download-file-list">
         {jobForSummary.files.map((file) => {
@@ -113,7 +101,6 @@ export function DownloadPanel({
                 {displayFile.status}
                 {typeof displayFile.receivedBytes === 'number' ? ` / ${formatBytes(displayFile.receivedBytes)}` : ''}
                 {typeof displayFile.totalBytes === 'number' ? ` of ${formatBytes(displayFile.totalBytes)}` : ''}
-                {typeof displayFile.totalBytes !== 'number' ? ' / total unknown' : ''}
               </small>
               {file.fileKind === 'archive' ? (
                 <div className="archive-preview-actions">
@@ -137,28 +124,17 @@ export function DownloadPanel({
 
       {downloadQueueState ? (
         <p className="state">
-          {downloadQueueState.progress.completedFiles} of {downloadQueueState.progress.totalFiles} completed;{' '}
-          {downloadQueueState.progress.skippedFiles} skipped; {downloadQueueState.progress.blockedFiles} blocked;{' '}
-          {downloadQueueState.progress.failedFiles} failed.
+          {downloadQueueState.progress.completedFiles} of {downloadQueueState.progress.totalFiles} completed.
         </p>
       ) : null}
 
       {downloadResult ? (
         <p className="state">
-          Result: {downloadResult.status} ({downloadResult.completedFiles} completed, {downloadResult.skippedFiles} skipped,{' '}
-          {downloadResult.failedFiles} failed, {downloadResult.cancelledFiles} cancelled)
+          Result: {downloadResult.status} ({downloadResult.completedFiles} completed, {downloadResult.failedFiles} failed)
         </p>
       ) : null}
 
-      {summary.warnings.length > 0 ? (
-        <ul className="warning-list">
-          {summary.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {summary.errors.length > 0 ? (
+      {!advisoryValidationOk || summary.errors.length > 0 ? (
         <ul className="warning-list error-list">
           {summary.errors.map((downloadError) => (
             <li key={`${downloadError.code}-${downloadError.message}`}>
@@ -205,17 +181,6 @@ export function ArchivePreviewDetails({ preview }: { preview: ArchivePreview }):
               {warning.code}: {warning.message}
             </li>
           ))}
-        </ul>
-      ) : null}
-      {preview.warnings.some((warning) => !warning.blocking) ? (
-        <ul className="warning-list">
-          {preview.warnings
-            .filter((warning) => !warning.blocking)
-            .map((warning) => (
-              <li key={`${warning.code}-${warning.entryPath ?? warning.message}`}>
-                {warning.code}: {warning.message}
-              </li>
-            ))}
         </ul>
       ) : null}
     </div>

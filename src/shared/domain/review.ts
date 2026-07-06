@@ -11,11 +11,10 @@ import type {
   TrackFile
 } from './models';
 import { getDownloadCandidateClassification, isRecommendedDownloadCandidate } from './classification';
-import { buildSongFolderName, isArtistCatalogInput, sanitizePathSegment } from './planning';
+import { buildSongFolderName, sanitizePathSegment } from './planning';
 
 export function createReviewSessionFromDryRunPlan(plan: DryRunPlan): ReviewSession {
-  const defaultIncluded = !isArtistCatalogInput(plan.input);
-  const groups = plan.groups.map((group) => createReviewGroup(group, undefined, defaultIncluded));
+  const groups = plan.groups.map((group) => createReviewGroup(group, undefined, true));
 
   return {
     reviewSessionId: `review-${plan.createdAt}`,
@@ -232,8 +231,7 @@ export function mergeGroups(session: ReviewSession, sourceGroupId: string, targe
 }
 
 export function resetGroupOverrides(session: ReviewSession, groupId: string): ReviewSession {
-  const defaultIncluded = !isArtistCatalogInput(session.sourcePlan.input);
-  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId, defaultIncluded));
+  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId, true));
 }
 
 export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: StemLibraryRoot): DryRunPlan {

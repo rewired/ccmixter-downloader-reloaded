@@ -36,7 +36,7 @@ describe('DownloadManager', () => {
     });
     const job = await manager.createJobFromReviewedPlan(createPlan(root));
     const state = await manager.startDownloadJob(job.jobId);
-    const target = path.join(root, 'Wiseman', 'Boxcar heading West (145 bpm)', 'BASS.flac');
+    const target = path.join(root, 'Wiseman', 'Boxcar heading West (145 BPM)', 'BASS.flac');
 
     expect(state.status).toBe('completed');
     expect(await readFile(target, 'utf8')).toBe('bass-data');
@@ -94,7 +94,7 @@ describe('DownloadManager', () => {
 
   it('blocks existing files before writing', async () => {
     const root = await tempRoot();
-    const target = path.join(root, 'Wiseman', 'Boxcar heading West (145 bpm)', 'BASS.flac');
+    const target = path.join(root, 'Wiseman', 'Boxcar heading West (145 BPM)', 'BASS.flac');
     await writeFileWithDir(target, 'existing');
     let fetchCount = 0;
     const manager = new DownloadManager({

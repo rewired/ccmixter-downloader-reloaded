@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { ARTIST_CATALOG_QUERY_LIMIT } from '../../src/main/services/ccmixter/ccmixterApiClient';
 import { ArtistCatalogSessionManager } from '../../src/main/services/ccmixter/artistCatalogSessionManager';
 import { buildTrackFile } from '../../src/main/services/ccmixter/ccmixterApiClient';
-import type { CcmixterApiUploadMapping } from '../../src/main/services/ccmixter/ccmixterTypes';
+import type { CcmixterApiUploadMapping, CcmixterHtmlEnrichment } from '../../src/main/services/ccmixter/ccmixterTypes';
 
-function makeMapping(uploadId: string, artistLogin = 'testArtist'): CcmixterApiUploadMapping {
+function makeMapping(uploadId: string, artistLogin = 'testArtist', files = [buildTrackFile(`test-${uploadId}.mp3`, `https://ccmixter.org/download/${uploadId}`, 'api')]): CcmixterApiUploadMapping {
   return {
     upload: {
       uploadId,
@@ -18,7 +18,7 @@ function makeMapping(uploadId: string, artistLogin = 'testArtist'): CcmixterApiU
       metadataSource: 'api',
       warnings: []
     },
-    files: [buildTrackFile(`test-${uploadId}.mp3`, `https://ccmixter.org/download/${uploadId}`, 'api')],
+    files,
     warnings: []
   };
 }
@@ -39,6 +39,167 @@ function delayReject(error: Error, ms: number): Promise<never> {
 }
 
 describe('ArtistCatalogSessionManager', () => {
+  it('enriches artist catalog entries with upload-page file candidates', async () => {
+    const apiPage = vi.fn().mockResolvedValue({
+      mappings: [makeMapping('1', 'testArtist', [])],
+      warnings: []
+    });
+    const enrichUploadPage = vi.fn().mockResolvedValue(enrichmentWithFile('from-html-1.flac'));
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: {
+        resolveArtistCatalogPage: async () => ({ mappings: [], nextPageUrls: [], totalCount: 1, warnings: [] }),
+        enrichUploadPage
+      }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    expect(start.value.groups).toHaveLength(1);
+    expect(start.value.downloadableFileCount).toBe(1);
+    expect(start.value.noFilesFoundCount).toBe(0);
+    expect(start.value.couldNotCheckFilesCount).toBe(0);
+    expect(start.value.groups[0]?.files[0]?.originalFilename).toBe('from-html-1.flac');
+    expect(enrichUploadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates successful no-file enrichment from failed upload-page checks', async () => {
+    const apiPage = vi.fn().mockResolvedValue({
+      mappings: [makeMapping('1', 'testArtist', []), makeMapping('2', 'testArtist', [])],
+      warnings: []
+    });
+    const enrichUploadPage = vi.fn().mockImplementation(async (sourceUrl: string) => {
+      if (sourceUrl.endsWith('/2')) {
+        throw new Error('timeout');
+      }
+      return emptyEnrichment();
+    });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: {
+        resolveArtistCatalogPage: async () => ({ mappings: [], nextPageUrls: [], totalCount: 2, warnings: [] }),
+        enrichUploadPage
+      }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    expect(start.value.groups).toEqual([]);
+    expect(start.value.noFilesFoundCount).toBe(1);
+    expect(start.value.couldNotCheckFilesCount).toBe(1);
+    expect(start.value.noFilesFoundUploads[0]?.upload.uploadId).toBe('1');
+    expect(start.value.couldNotCheckFilesUploads[0]?.upload.uploadId).toBe('2');
+  });
+
+  it('reuses upload-page enrichment within the same session', async () => {
+    const first = makeMapping('1', 'testArtist', []);
+    const second = makeMapping('2', 'testArtist', []);
+    second.upload.sourceUrl = first.upload.sourceUrl;
+    const apiPage = vi.fn()
+      .mockResolvedValueOnce({ mappings: [first], warnings: [] })
+      .mockResolvedValueOnce({ mappings: [second], warnings: [] });
+    const enrichUploadPage = vi.fn().mockResolvedValue(enrichmentWithFile('cached.flac'));
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: {
+        resolveArtistCatalogPage: async () => ({ mappings: [], nextPageUrls: [], totalCount: 2, warnings: [] }),
+        enrichUploadPage
+      }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    const more = await manager.loadMore(start.value.sessionId);
+
+    expect(more.ok).toBe(true);
+    if (!more.ok) return;
+    expect(more.value.groups).toHaveLength(2);
+    expect(enrichUploadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds upload-page enrichment concurrency', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const apiPage = vi.fn().mockResolvedValue({
+      mappings: Array.from({ length: 8 }, (_value, index) => makeMapping(String(index + 1), 'testArtist', [])),
+      warnings: []
+    });
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: {
+        resolveArtistCatalogPage: async () => ({ mappings: [], nextPageUrls: [], totalCount: 8, warnings: [] }),
+        enrichUploadPage: async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await delay(emptyEnrichment(), 20);
+          active -= 1;
+          return emptyEnrichment();
+        }
+      }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+
+    expect(start.ok).toBe(true);
+    expect(maxActive).toBeLessThanOrEqual(4);
+  });
+
+  it('cancels future enrichment while preserving already discovered files', async () => {
+    const apiPage = vi.fn()
+      .mockResolvedValueOnce({ mappings: [makeMapping('1', 'testArtist', [])], warnings: [] })
+      .mockResolvedValueOnce({ mappings: [makeMapping('2', 'testArtist', []), makeMapping('3', 'testArtist', [])], warnings: [] });
+    const enrichUploadPage = vi.fn().mockImplementation((sourceUrl: string) =>
+      sourceUrl.endsWith('/1') ? Promise.resolve(enrichmentWithFile('first.flac')) : delay(enrichmentWithFile('late.flac'), 50)
+    );
+
+    const manager = new ArtistCatalogSessionManager({
+      apiClient: {
+        resolveByArtistLoginPage: apiPage,
+        resolveByArtistLogin: async () => ({ mappings: [], pagingIncomplete: false, warnings: [] })
+      },
+      htmlClient: {
+        resolveArtistCatalogPage: async () => ({ mappings: [], nextPageUrls: [], totalCount: 3, warnings: [] }),
+        enrichUploadPage
+      }
+    });
+
+    const start = await manager.startSession('testArtist', 'https://ccmixter.org/people/testArtist');
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+
+    const loading = manager.loadMore(start.value.sessionId);
+    const cancelled = manager.cancelSession(start.value.sessionId);
+    const loaded = await loading;
+
+    expect(cancelled.ok).toBe(true);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value.scanPhase).toBe('cancelled');
+    expect(loaded.value.groups).toHaveLength(1);
+    expect(loaded.value.groups[0]?.files[0]?.originalFilename).toBe('first.flac');
+  });
+
   it('returns first chunk with totalCount 96 from HTML info', async () => {
     const apiPage = vi.fn().mockResolvedValue(makePage(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']));
     const catalogPage = vi.fn().mockResolvedValue({
@@ -465,3 +626,30 @@ describe('ArtistCatalogSessionManager', () => {
     expect(iterations).toBeLessThanOrEqual(20);
   });
 });
+
+function enrichmentWithFile(filename: string): CcmixterHtmlEnrichment {
+  return {
+    sourceUrl: 'https://ccmixter.org/files/testArtist/1',
+    tags: ['stems'],
+    fileCandidates: [
+      {
+        label: filename,
+        file: buildTrackFile(filename, `https://ccmixter.org/download/${filename}`, 'html-enriched')
+      }
+    ],
+    zipFileHints: [],
+    relatedUploadUrls: [],
+    warnings: []
+  };
+}
+
+function emptyEnrichment(): CcmixterHtmlEnrichment {
+  return {
+    sourceUrl: 'https://ccmixter.org/files/testArtist/1',
+    tags: [],
+    fileCandidates: [],
+    zipFileHints: [],
+    relatedUploadUrls: [],
+    warnings: ['HTML enrichment did not find visible downloadable file candidates.']
+  };
+}
