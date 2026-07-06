@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDryRunPlanFromGroups, createReviewSessionFromDryRunPlan, type StemGroup } from '../../src/shared/domain';
-import { toRawRow, toReviewRow } from '../../src/renderer/ui/UploadListDetail';
+import { capArchiveHints, MAX_INLINE_ARCHIVE_HINTS, toRawRow, toReviewRow } from '../../src/renderer/ui/UploadListDetail';
 
 describe('upload row mapping', () => {
   it('maps a raw resolver group to a compact row of discovered files without a tags or badges field', () => {
@@ -57,6 +57,23 @@ describe('upload row mapping', () => {
 
     expect(row.discoveredFileCount).toBeGreaterThan(0);
     expect(row.selectedFileCount).toBe(0);
+  });
+});
+
+describe('capArchiveHints', () => {
+  it('leaves a short archive entry list untouched', () => {
+    const entries = ['a.flac', 'b.flac', 'c.flac'];
+
+    expect(capArchiveHints(entries)).toEqual({ visible: entries, hiddenCount: 0 });
+  });
+
+  it('caps a large archive entry list at the max and reports how many were hidden', () => {
+    const entries = Array.from({ length: 45 }, (_value, index) => `track-${index}.flac`);
+    const result = capArchiveHints(entries);
+
+    expect(result.visible).toHaveLength(MAX_INLINE_ARCHIVE_HINTS);
+    expect(result.visible).toEqual(entries.slice(0, MAX_INLINE_ARCHIVE_HINTS));
+    expect(result.hiddenCount).toBe(45 - MAX_INLINE_ARCHIVE_HINTS);
   });
 });
 

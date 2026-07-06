@@ -6,6 +6,8 @@ import {
   RELATED_UPLOADS_NOT_RECURSIVELY_RESOLVED_WARNING,
   isArtistCatalogInput,
   parseCcmixterInput,
+  preferMusicianFacingFileLabel,
+  resolveMusicianFacingFileLabel,
   withDownloadCandidateClassification,
   type CcmixterInput,
   type DryRunPlan,
@@ -27,6 +29,7 @@ import type {
   CcmixterHtmlCatalogResult,
   CcmixterHtmlEnrichment,
   CcmixterResolverDependencies,
+  HtmlArchiveHintGroup,
   ResolveCcmixterMetadataOptions
 } from './ccmixterTypes';
 
@@ -268,6 +271,7 @@ export class CcmixterResolver {
             tags: [],
             fileCandidates: [],
             zipFileHints: [],
+            archiveHintGroups: [],
             relatedUploadUrls: [],
             warnings: [
               error instanceof Error
@@ -330,34 +334,73 @@ function mergeFiles(apiFiles: TrackFile[], enrichment: CcmixterHtmlEnrichment | 
     files.set(fileKey(file), file);
   }
 
-  if (enrichment) {
-    for (const candidate of enrichment.fileCandidates) {
-      const existing = files.get(fileKey(candidate.file));
-      const htmlZipFileHints = candidate.file.fileKind === 'archive' ? enrichment.zipFileHints : undefined;
+  if (!enrichment) {
+    return [...files.values()];
+  }
 
-      if (existing) {
-        files.set(fileKey(existing), {
-          ...existing,
-          metadataSource: combineSource(existing.metadataSource, 'html-enriched'),
-          displayLabel: existing.displayLabel ?? candidate.file.displayLabel,
-          zipFileHints: mergeZipFileHints(existing.zipFileHints, htmlZipFileHints),
-          warnings: [...existing.warnings, 'Matching HTML file candidate was found for this API file.']
-        });
-      } else {
-        files.set(fileKey(candidate.file), {
-          ...candidate.file,
-          zipFileHints: mergeZipFileHints(candidate.file.zipFileHints, htmlZipFileHints)
-        });
-      }
+  for (const candidate of enrichment.fileCandidates) {
+    const existing = files.get(fileKey(candidate.file));
+
+    if (existing) {
+      files.set(fileKey(existing), {
+        ...existing,
+        metadataSource: combineSource(existing.metadataSource, 'html-enriched'),
+        displayLabel:
+          preferMusicianFacingFileLabel(resolveMusicianFacingFileLabel(existing), resolveMusicianFacingFileLabel(candidate.file)) ??
+          existing.displayLabel ??
+          candidate.file.displayLabel,
+        warnings: [...existing.warnings, 'Matching HTML file candidate was found for this API file.']
+      });
+    } else {
+      files.set(fileKey(candidate.file), { ...candidate.file });
     }
   }
+
+  attachArchiveHintGroups(files, enrichment.archiveHintGroups);
 
   return [...files.values()];
 }
 
+// ccMixter's upload-page HTML can list ZIP contents for multiple archives on the same page (one
+// <p class="zipdir_title">/<ul class="cc_zipdir"> pair per archive), and positional order is the
+// only correlation the static HTML offers between an archive file and its contents. API-sourced ZIP
+// contents (file_format_info.zipdir.files) are exact and always take priority for a given archive's
+// entries; an HTML hint group is only used to fill in entries or improve a label, and only for the
+// archive at the same position - never broadcast to every archive candidate.
+function attachArchiveHintGroups(files: Map<string, TrackFile>, hintGroups: HtmlArchiveHintGroup[]): void {
+  if (hintGroups.length === 0) {
+    return;
+  }
+
+  const archiveEntries = [...files.entries()].filter(([, file]) => isArchiveFile(file));
+
+  archiveEntries.forEach(([key, file], index) => {
+    const group = hintGroups[index];
+
+    if (!group) {
+      return;
+    }
+
+    const hasExactApiEntries = (file.zipFileHints?.length ?? 0) > 0;
+    const groupLabel = group.label
+      ? resolveMusicianFacingFileLabel({ displayLabel: group.label, originalFilename: file.originalFilename, extension: file.extension })
+      : undefined;
+
+    files.set(key, {
+      ...file,
+      zipFileHints: hasExactApiEntries ? file.zipFileHints : mergeZipFileHints(file.zipFileHints, group.entries),
+      displayLabel: preferMusicianFacingFileLabel(resolveMusicianFacingFileLabel(file), groupLabel) ?? file.displayLabel
+    });
+  });
+}
+
+function isArchiveFile(file: TrackFile): boolean {
+  return file.fileKind === 'archive' || file.extension.toLowerCase() === 'zip';
+}
+
 // API-sourced ZIP contents (from file_format_info.zipdir.files) are more precise than the HTML
-// fallback's page-text scraping, so they must survive HTML enrichment rather than being overwritten
-// by it; when both are present, combine them instead of picking one.
+// fallback's scraping, so they must survive HTML enrichment rather than being overwritten by it;
+// when both are present, combine them instead of picking one.
 function mergeZipFileHints(apiHints: string[] | undefined, htmlHints: string[] | undefined): string[] | undefined {
   if (!apiHints || apiHints.length === 0) {
     return htmlHints;
@@ -409,6 +452,7 @@ function hasContributedHtmlData(enrichment: CcmixterHtmlEnrichment): boolean {
     typeof enrichment.licenseSummary === 'string' ||
     enrichment.fileCandidates.length > 0 ||
     enrichment.zipFileHints.length > 0 ||
+    enrichment.archiveHintGroups.length > 0 ||
     enrichment.relatedUploadUrls.length > 0
   );
 }

@@ -638,6 +638,7 @@ function enrichmentWithFile(filename: string): CcmixterHtmlEnrichment {
       }
     ],
     zipFileHints: [],
+    archiveHintGroups: [],
     relatedUploadUrls: [],
     warnings: []
   };
@@ -649,6 +650,7 @@ function emptyEnrichment(): CcmixterHtmlEnrichment {
     tags: [],
     fileCandidates: [],
     zipFileHints: [],
+    archiveHintGroups: [],
     relatedUploadUrls: [],
     warnings: ['HTML enrichment did not find visible downloadable file candidates.']
   };

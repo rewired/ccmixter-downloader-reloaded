@@ -11,6 +11,7 @@ import type {
   TrackFile
 } from './models';
 import { getDownloadCandidateClassification, isRecommendedDownloadCandidate } from './classification';
+import { resolveMusicianFacingFileLabel } from './fileLabel';
 import { buildSongFolderName, sanitizePathSegment } from './planning';
 
 export function createReviewSessionFromDryRunPlan(plan: DryRunPlan): ReviewSession {
@@ -316,7 +317,7 @@ function createReviewFile(groupId: string, file: TrackFile, index: number, inclu
 // technical originalFilename (e.g. "Stems, Second Half" vs "Zutsuri_-_Haze.zip"), so the default
 // target filename prefers it when it adds information beyond the bare extension.
 function buildDefaultTargetFilename(file: TrackFile): string {
-  const label = usefulDisplayLabel(file);
+  const label = resolveMusicianFacingFileLabel(file);
 
   if (!label) {
     return file.originalFilename;
@@ -326,31 +327,6 @@ function buildDefaultTargetFilename(file: TrackFile): string {
   const extension = file.extension && file.extension !== 'unknown' ? file.extension : undefined;
 
   return extension ? `${sanitizedBase}.${extension}` : sanitizedBase;
-}
-
-function usefulDisplayLabel(file: TrackFile): string | undefined {
-  const label = file.displayLabel?.trim();
-
-  if (!label) {
-    return undefined;
-  }
-
-  const extension = file.extension?.toLowerCase();
-  const strippedLabel = extension && label.toLowerCase().endsWith(`.${extension}`) ? label.slice(0, label.length - extension.length - 1).trim() : label;
-
-  if (strippedLabel.length === 0) {
-    return undefined;
-  }
-
-  if (extension && strippedLabel.toLowerCase() === extension) {
-    return undefined;
-  }
-
-  if (strippedLabel.toLowerCase() === file.originalFilename.toLowerCase()) {
-    return undefined;
-  }
-
-  return strippedLabel;
 }
 
 // Alternate labels can collide across files in the same group (e.g. two archives both nicnamed

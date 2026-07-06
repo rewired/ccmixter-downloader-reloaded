@@ -3,6 +3,7 @@ import type {
   CcmixterHtmlCatalogResult,
   CcmixterHtmlClientOptions,
   CcmixterHtmlEnrichment,
+  HtmlArchiveHintGroup,
   HtmlFileCandidate
 } from './ccmixterTypes';
 
@@ -235,6 +236,7 @@ export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): Ccmix
   const licenseSummary = parseLicenseSummary(cleanedHtml, text);
   const fileCandidates = parseFileCandidates(html, sourceUrl);
   const zipFileHints = parseZipFileHints(text);
+  const archiveHintGroups = parseArchiveHintGroups(cleanedHtml);
   const relatedUploadUrls = parseRelatedUploadUrls(cleanedHtml, sourceUrl);
 
   if (typeof bpm !== 'number') {
@@ -260,6 +262,7 @@ export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): Ccmix
     licenseSummary,
     fileCandidates,
     zipFileHints,
+    archiveHintGroups,
     relatedUploadUrls,
     warnings
   };
@@ -562,6 +565,57 @@ function parseScriptAssignedMediaUrls(html: string): string[] {
   }
 
   return [...urls];
+}
+
+// Each upload page can render several archives' ZIP contents as sibling
+// <p class="zipdir_title">Contents of ZIP Archive: <span>LABEL</span></p><ul class="cc_zipdir">...</ul>
+// pairs, one per archive, in the same order as the archive files themselves. This is the only
+// correlation the static HTML offers between an archive file and its contents, so groups are kept
+// separate here rather than flattened - the caller pairs them with archive files positionally.
+function parseArchiveHintGroups(html: string): HtmlArchiveHintGroup[] {
+  const groupPattern =
+    /<p\b[^>]*class=["'][^"']*\bzipdir_title\b[^"']*["'][^>]*>([\s\S]*?)<\/p>\s*<ul\b[^>]*class=["'][^"']*\bcc_zipdir\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/gi;
+  const groups: HtmlArchiveHintGroup[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = groupPattern.exec(html)) !== null) {
+    const entries = extractArchiveHintGroupEntries(match[2] ?? '');
+
+    if (entries.length > 0) {
+      groups.push({
+        label: extractArchiveHintGroupLabel(match[1] ?? ''),
+        entries
+      });
+    }
+  }
+
+  return groups;
+}
+
+function extractArchiveHintGroupLabel(titleHtml: string): string | undefined {
+  const spanMatch = /<span\b[^>]*>([\s\S]*?)<\/span>/i.exec(titleHtml);
+  const label = decodeHtml(stripTags(spanMatch?.[1] ?? titleHtml)).replace(/\s+/g, ' ').trim();
+
+  return label.length > 0 ? label : undefined;
+}
+
+function extractArchiveHintGroupEntries(listHtml: string): string[] {
+  const entryPattern = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+  const entries: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = entryPattern.exec(listHtml)) !== null) {
+    const entry = decodeHtml(stripTags(match[1] ?? ''))
+      .replace(/^\/+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (entry.length > 0) {
+      entries.push(entry);
+    }
+  }
+
+  return entries;
 }
 
 function parseZipFileHints(text: string): string[] {

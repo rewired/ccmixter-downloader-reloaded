@@ -39,13 +39,24 @@ export interface HtmlFileCandidate {
   label: string;
 }
 
+// ccMixter upload pages can list ZIP contents for several archives on the same page, one
+// <p class="zipdir_title">/<ul class="cc_zipdir"> pair per archive. Each group's entries belong to
+// exactly one archive; they must not be flattened into a single page-wide list (see legacy
+// zipFileHints below, kept only as a fallback for pages that don't use this structure).
+export interface HtmlArchiveHintGroup {
+  label?: string;
+  entries: string[];
+}
+
 export interface CcmixterHtmlEnrichment {
   sourceUrl?: string;
   bpm?: number;
   tags: string[];
   licenseSummary?: string;
   fileCandidates: HtmlFileCandidate[];
+  /** @deprecated Legacy page-wide flat ZIP hint scrape; prefer archiveHintGroups. Kept as a fallback for pages that don't expose the structured zipdir_title/cc_zipdir markup. */
   zipFileHints: string[];
+  archiveHintGroups: HtmlArchiveHintGroup[];
   relatedUploadUrls: string[];
   warnings: string[];
 }

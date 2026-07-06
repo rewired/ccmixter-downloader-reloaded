@@ -157,16 +157,10 @@ function ReviewGroupDetail({
   onChange: (session: ReviewSession) => void;
 }): JSX.Element {
   const firstUpload = group.originalGroup.uploads[0];
+  const selectedFileCount = group.files.filter((file) => file.included).length;
 
   return (
     <section className="upload-detail" aria-label="Selected song files">
-      <div className="detail-heading">
-        <h2>
-          {group.songFolderName} <span className="detail-heading__artist">by {group.artistName}</span>
-        </h2>
-        {firstUpload?.licenseSummary ? <LicenseBadge licenseSummary={firstUpload.licenseSummary} /> : null}
-      </div>
-
       <div className="path-row">
         <input
           className="inline-edit path-input"
@@ -185,6 +179,20 @@ function ReviewGroupDetail({
           title={t('review.songFolder')}
           size={Math.max(group.songFolderName.length, 1)}
         />
+      </div>
+
+      <div className="detail-meta">
+        {firstUpload?.licenseSummary ? <LicenseBadge licenseSummary={firstUpload.licenseSummary} /> : null}
+        {typeof group.originalGroup.bpm === 'number' ? <span>{group.originalGroup.bpm} BPM</span> : null}
+        <span>
+          {formatFileCountLabel({
+            id: group.reviewGroupId,
+            title: group.songFolderName,
+            artist: group.artistName,
+            discoveredFileCount: group.files.length,
+            selectedFileCount
+          })}
+        </span>
       </div>
 
       <ul className="candidate-list file-list">
@@ -246,18 +254,17 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
 
   return (
     <section className="upload-detail" aria-label="Selected song files">
-      <div className="detail-heading">
-        <h2>
-          {group.canonicalSongTitle} <span className="detail-heading__artist">by {group.artist}</span>
-        </h2>
-        <LicenseBadge licenseSummary={firstUpload?.licenseSummary} />
+      <div className="path-row path-row--static">
+        <span className="path-static">{group.artist}</span>
+        <span className="path-sep" aria-hidden="true">/</span>
+        <span className="path-static">{group.canonicalSongTitle}</span>
       </div>
-      <dl className="details compact">
-        <div>
-          <dt>BPM</dt>
-          <dd>{group.bpm ?? 'not specified'}</dd>
-        </div>
-      </dl>
+
+      <div className="detail-meta">
+        <LicenseBadge licenseSummary={firstUpload?.licenseSummary} />
+        <span>{typeof group.bpm === 'number' ? `${group.bpm} BPM` : 'BPM not specified'}</span>
+      </div>
+
       <ul className="candidate-list file-list">
         {group.files.map((file) => (
           <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`} data-filename={file.originalFilename}>
@@ -273,6 +280,22 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
   );
 }
 
+// Real ccMixter archives can carry dozens of ZIP-internal entries; rendering all of them inline
+// would turn a single file row into a wall of text, so the disclosure is capped and the rest is
+// summarized instead of listed.
+export const MAX_INLINE_ARCHIVE_HINTS = 5;
+
+export function capArchiveHints(
+  entries: string[],
+  max = MAX_INLINE_ARCHIVE_HINTS
+): { visible: string[]; hiddenCount: number } {
+  if (entries.length <= max) {
+    return { visible: entries, hiddenCount: 0 };
+  }
+
+  return { visible: entries.slice(0, max), hiddenCount: entries.length - max };
+}
+
 function ArchiveDisclosure({ file }: { file: TrackFile }): JSX.Element | null {
   const entries = file.zipFileHints ?? [];
 
@@ -280,13 +303,16 @@ function ArchiveDisclosure({ file }: { file: TrackFile }): JSX.Element | null {
     return null;
   }
 
+  const { visible, hiddenCount } = capArchiveHints(entries);
+
   return (
     <details className="archive-disclosure">
-      <summary>{entries.length} files inside</summary>
+      <summary>ZIP · {entries.length} file{entries.length === 1 ? '' : 's'} inside</summary>
       <ul className="archive-disclosure__list">
-        {entries.map((entry) => (
+        {visible.map((entry) => (
           <li key={entry}>{entry}</li>
         ))}
+        {hiddenCount > 0 ? <li className="archive-disclosure__more">+{hiddenCount} more</li> : null}
       </ul>
     </details>
   );

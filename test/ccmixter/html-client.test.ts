@@ -143,6 +143,19 @@ describe('parseCcmixterUploadHtml', () => {
     expect(enrichment.relatedUploadUrls).toContain('https://ccmixter.org/files/Reiswerk/56402');
   });
 
+  it('models each recorded Haze ZIP archive as its own hint group instead of one flat page-wide list', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/haze-56384-page.html'), 'utf8');
+    const enrichment = parseCcmixterUploadHtml(html, 'https://ccmixter.org/files/Zutsuri/56384');
+
+    expect(enrichment.archiveHintGroups).toHaveLength(2);
+    expect(enrichment.archiveHintGroups[0]?.label).toBe('Stems, Second Half');
+    expect(enrichment.archiveHintGroups[0]?.entries).toContain('haze - Vox 3.02_01-01.flac (927.47KB)');
+    expect(enrichment.archiveHintGroups[0]?.entries).not.toContain('haze - Airy Organ_01.flac (20.55MB)');
+    expect(enrichment.archiveHintGroups[1]?.label).toBe('Stems, First Half');
+    expect(enrichment.archiveHintGroups[1]?.entries).toContain('haze - Airy Organ_01.flac (20.55MB)');
+    expect(enrichment.archiveHintGroups[1]?.entries).not.toContain('haze - Vox 3.02_01-01.flac (927.47KB)');
+  });
+
   it('extracts recorded related remix-child upload links without live network', async () => {
     const html = await readFile(path.resolve('test/fixtures/ccmixter/soundbitch-1883-page.html'), 'utf8');
     const enrichment = parseCcmixterUploadHtml(html, 'https://ccmixter.org/files/soundbitch/1883');

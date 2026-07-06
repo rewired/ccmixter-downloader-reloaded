@@ -53,6 +53,7 @@ describe('CcmixterResolver', () => {
           tags: [],
           fileCandidates: [],
           zipFileHints: [],
+          archiveHintGroups: [],
           relatedUploadUrls: [],
           warnings: []
         })
@@ -99,6 +100,7 @@ describe('CcmixterResolver', () => {
         }
       ],
       zipFileHints: [],
+      archiveHintGroups: [],
       relatedUploadUrls: [],
       warnings: []
     };
@@ -107,6 +109,85 @@ describe('CcmixterResolver', () => {
     const mergedZip = candidate?.files.find((file) => file.originalFilename === 'Song-stems.zip');
 
     expect(mergedZip?.zipFileHints).toEqual(['BASS.flac (1.2MB)', 'VOCALS.flac (2.1MB)']);
+  });
+
+  it('lets a meaningful HTML label override a weak extension-only API label', () => {
+    const mapping = mapRawApiUpload({
+      upload_id: '9003',
+      upload_name: 'Weak Label Song',
+      user_name: 'WiseMan',
+      user_real_name: 'Wiseman',
+      file_page_url: 'https://ccmixter.org/files/WiseMan/9003',
+      files: [
+        {
+          file_name: 'Song-extras.zip',
+          file_nicname: 'zip',
+          download_url: 'https://ccmixter.org/content/WiseMan/Song-extras.zip'
+        }
+      ]
+    });
+    const enrichment = {
+      sourceUrl: mapping.upload.sourceUrl,
+      tags: [],
+      fileCandidates: [
+        {
+          label: 'Extra Goodies',
+          file: {
+            originalFilename: 'Song-extras.zip',
+            fileKind: 'archive' as const,
+            extension: 'zip',
+            downloadUrl: 'https://ccmixter.org/content/WiseMan/Song-extras.zip',
+            metadataSource: 'html-enriched' as const,
+            displayLabel: 'Extra Goodies',
+            warnings: []
+          }
+        }
+      ],
+      zipFileHints: [],
+      archiveHintGroups: [],
+      relatedUploadUrls: [],
+      warnings: []
+    };
+
+    const [candidate] = buildGroupingCandidates([mapping], [enrichment]);
+    const merged = candidate?.files.find((file) => file.originalFilename === 'Song-extras.zip');
+
+    expect(merged?.displayLabel).toBe('Extra Goodies');
+  });
+
+  it('attaches distinct HTML archive hint groups to each archive by position instead of broadcasting entries to every archive', () => {
+    const mapping = mapRawApiUpload({
+      upload_id: '9004',
+      upload_name: 'Two Archives',
+      user_name: 'WiseMan',
+      user_real_name: 'Wiseman',
+      file_page_url: 'https://ccmixter.org/files/WiseMan/9004',
+      files: [
+        { file_name: 'song-a.zip', download_url: 'https://ccmixter.org/content/WiseMan/song-a.zip' },
+        { file_name: 'song-b.zip', download_url: 'https://ccmixter.org/content/WiseMan/song-b.zip' }
+      ]
+    });
+    const enrichment = {
+      sourceUrl: mapping.upload.sourceUrl,
+      tags: [],
+      fileCandidates: [],
+      zipFileHints: [],
+      archiveHintGroups: [
+        { label: 'Stems, Second Half', entries: ['one.flac (1.0MB)', 'two.flac (2.0MB)'] },
+        { label: 'Stems, First Half', entries: ['three.flac (3.0MB)'] }
+      ],
+      relatedUploadUrls: [],
+      warnings: []
+    };
+
+    const [candidate] = buildGroupingCandidates([mapping], [enrichment]);
+    const first = candidate?.files.find((file) => file.originalFilename === 'song-a.zip');
+    const second = candidate?.files.find((file) => file.originalFilename === 'song-b.zip');
+
+    expect(first?.zipFileHints).toEqual(['one.flac (1.0MB)', 'two.flac (2.0MB)']);
+    expect(first?.displayLabel).toBe('Stems, Second Half');
+    expect(second?.zipFileHints).toEqual(['three.flac (3.0MB)']);
+    expect(second?.displayLabel).toBe('Stems, First Half');
   });
 
   it('groups same artist and normalized song title conservatively', () => {
@@ -264,6 +345,7 @@ describe('CcmixterResolver', () => {
           tags: [],
           fileCandidates: [],
           zipFileHints: [],
+          archiveHintGroups: [],
           relatedUploadUrls: [],
           warnings: []
         })
@@ -348,6 +430,7 @@ describe('CcmixterResolver', () => {
           tags: [],
           fileCandidates: [],
           zipFileHints: [],
+          archiveHintGroups: [],
           relatedUploadUrls: [],
           warnings: []
         })
