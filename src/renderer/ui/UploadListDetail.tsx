@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 
 import {
-  getDownloadCandidateClassification,
   renameArtist,
   renameFile,
   renameGroup,
@@ -10,7 +9,8 @@ import {
   type ReviewFile,
   type ReviewGroup,
   type ReviewSession,
-  type StemGroup
+  type StemGroup,
+  type TrackFile
 } from '../../shared/domain';
 import { t } from '../i18n';
 
@@ -22,8 +22,8 @@ export interface UploadRow {
   artist: string;
   bpm?: number;
   license?: string;
-  fileCount: number;
-  badges: string[];
+  discoveredFileCount: number;
+  selectedFileCount?: number;
 }
 
 export function toReviewRow(group: ReviewGroup): UploadRow {
@@ -35,8 +35,8 @@ export function toReviewRow(group: ReviewGroup): UploadRow {
     artist: group.artistName,
     bpm: group.originalGroup.bpm,
     license: firstUpload?.licenseSummary,
-    fileCount: group.files.filter((file) => file.included).length,
-    badges: collectBadges(group.files.map((file) => file.originalFile))
+    discoveredFileCount: group.files.length,
+    selectedFileCount: group.files.filter((file) => file.included).length
   };
 }
 
@@ -49,8 +49,7 @@ export function toRawRow(group: StemGroup): UploadRow {
     artist: group.artist,
     bpm: group.bpm,
     license: firstUpload?.licenseSummary,
-    fileCount: group.files.length,
-    badges: collectBadges(group.files)
+    discoveredFileCount: group.files.length
   };
 }
 
@@ -74,7 +73,7 @@ export function UploadListDetail({
   const rows = useMemo(
     () =>
       (mode.kind === 'review' ? mode.reviewSession.groups.map(toReviewRow) : mode.groups.map(toRawRow)).filter(
-        (row) => row.fileCount > 0
+        (row) => row.discoveredFileCount > 0
       ),
     [mode]
   );
@@ -100,22 +99,13 @@ export function UploadListDetail({
                 >
                   <div className="upload-list-row__top">
                     <span className="upload-list-row__title">{row.title}</span>
-                    <span>{row.fileCount} file{row.fileCount === 1 ? '' : 's'}</span>
+                    <span>{formatFileCountLabel(row)}</span>
                   </div>
                   <div className="upload-list-row__meta">
                     <span>{row.artist}</span>
                     {typeof row.bpm === 'number' ? <span>{row.bpm} BPM</span> : null}
                     {row.license ? <LicenseBadge licenseSummary={row.license} /> : null}
                   </div>
-                  {row.badges.length > 0 ? (
-                    <div className="candidate-badges">
-                      {row.badges.map((badge) => (
-                        <span className="candidate-badge" key={badge}>
-                          {badge}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
                 </button>
               </li>
             ))}
@@ -149,6 +139,14 @@ export function UploadListDetail({
   );
 }
 
+function formatFileCountLabel(row: UploadRow): string {
+  const discovered = `${row.discoveredFileCount} file${row.discoveredFileCount === 1 ? '' : 's'}`;
+
+  return typeof row.selectedFileCount === 'number' && row.selectedFileCount > 0
+    ? `${discovered} · ${row.selectedFileCount} selected`
+    : discovered;
+}
+
 function ReviewGroupDetail({
   reviewSession,
   group,
@@ -169,55 +167,59 @@ function ReviewGroupDetail({
         {firstUpload?.licenseSummary ? <LicenseBadge licenseSummary={firstUpload.licenseSummary} /> : null}
       </div>
 
-      <div className="compact-fields">
-        <label className="compact-field">
-          <span>{t('review.artistFolder')}</span>
-          <input
-            value={group.artistName}
-            onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
-          />
-        </label>
-        <label className="compact-field">
-          <span>{t('review.songFolder')}</span>
-          <input
-            value={group.songFolderName}
-            onChange={(event) => onChange(renameGroup(reviewSession, group.reviewGroupId, event.target.value))}
-          />
-        </label>
+      <div className="path-row">
+        <input
+          className="inline-edit path-input"
+          value={group.artistName}
+          onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
+          aria-label={t('review.artistFolder')}
+          title={t('review.artistFolder')}
+          size={Math.max(group.artistName.length, 1)}
+        />
+        <span className="path-sep" aria-hidden="true">/</span>
+        <input
+          className="inline-edit path-input"
+          value={group.songFolderName}
+          onChange={(event) => onChange(renameGroup(reviewSession, group.reviewGroupId, event.target.value))}
+          aria-label={t('review.songFolder')}
+          title={t('review.songFolder')}
+          size={Math.max(group.songFolderName.length, 1)}
+        />
       </div>
 
-      <div>
-        <span className="field-label">{t('review.files')}</span>
-        <ul className="candidate-list">
-          {group.files.map((file) => (
-            <li className={file.included ? undefined : 'excluded-file'} key={file.fileId}>
-              <label className="file-toggle">
+      <ul className="candidate-list file-list">
+        {group.files.map((file) => {
+          const baseName = fileBaseName(file);
+          const extension = fileExtension(file);
+
+          return (
+            <li className={file.included ? undefined : 'excluded-file'} key={file.fileId} data-filename={file.originalFilename}>
+              <div className="file-row">
                 <input
                   checked={file.included}
                   onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
                   type="checkbox"
+                  aria-label={`Include ${file.originalFilename}`}
                 />
-                <span>{file.targetFilename}</span>
-              </label>
-              {file.targetFilename !== file.originalFilename ? <small>{t('review.originalFileName')}: {file.originalFilename}</small> : null}
-              <label className="field file-name-field">
-                <span>{t('review.targetFileName')}</span>
-                <span className="file-rename-row">
-                  <input
-                    value={fileBaseName(file)}
-                    onChange={(event) =>
-                      onChange(renameFile(reviewSession, file.fileId, composeFilename(event.target.value, fileExtension(file))))
-                    }
-                  />
-                  {fileExtension(file) ? <span className="file-rename-ext">.{fileExtension(file)}</span> : null}
-                </span>
-              </label>
-              <CandidateBadges file={file.originalFile} />
+                <input
+                  className="inline-edit file-name-input"
+                  value={baseName}
+                  onChange={(event) => onChange(renameFile(reviewSession, file.fileId, composeFilename(event.target.value, extension)))}
+                  aria-label={t('review.targetFileName')}
+                  title={file.originalFilename}
+                  size={Math.max(baseName.length, 1)}
+                />
+                {extension ? <span className="file-rename-ext">.{extension}</span> : null}
+                <ArchiveDisclosure file={file.originalFile} />
+              </div>
+              {file.targetFilename !== file.originalFilename ? (
+                <small>{t('review.originalFileName')}: {file.originalFilename}</small>
+              ) : null}
               {file.overrideWarnings.length > 0 ? <p className="user-note">This file name will be adjusted for your file system.</p> : null}
             </li>
-          ))}
-        </ul>
-      </div>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -256,11 +258,14 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
           <dd>{group.bpm ?? 'not specified'}</dd>
         </div>
       </dl>
-      <ul className="candidate-list">
+      <ul className="candidate-list file-list">
         {group.files.map((file) => (
-          <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`}>
-            <span>{file.originalFilename}</span>
-            <CandidateBadges file={file} />
+          <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`} data-filename={file.originalFilename}>
+            <div className="file-row">
+              <span>{file.displayLabel ?? file.originalFilename}</span>
+              {file.extension ? <span className="file-rename-ext">.{file.extension}</span> : null}
+              <ArchiveDisclosure file={file} />
+            </div>
           </li>
         ))}
       </ul>
@@ -268,15 +273,22 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
   );
 }
 
-function CandidateBadges({ file }: { file: ReviewFile['originalFile'] }): JSX.Element {
+function ArchiveDisclosure({ file }: { file: TrackFile }): JSX.Element | null {
+  const entries = file.zipFileHints ?? [];
+
+  if (entries.length === 0) {
+    return null;
+  }
+
   return (
-    <div className="candidate-badges">
-      {fileBadges(file).map((badge) => (
-        <span className="candidate-badge" key={badge}>
-          {badge}
-        </span>
-      ))}
-    </div>
+    <details className="archive-disclosure">
+      <summary>{entries.length} files inside</summary>
+      <ul className="archive-disclosure__list">
+        {entries.map((entry) => (
+          <li key={entry}>{entry}</li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -309,29 +321,4 @@ function UploadCheckSection({
       </ul>
     </details>
   );
-}
-
-function collectBadges(files: ReviewFile['originalFile'][]): string[] {
-  return [...new Set(files.flatMap(fileBadges))];
-}
-
-function fileBadges(file: ReviewFile['originalFile']): string[] {
-  const classification = getDownloadCandidateClassification(file);
-  const badges = new Set<string>();
-
-  if (classification.format !== 'other') {
-    badges.add(classification.format.toUpperCase());
-  }
-
-  if (classification.role === 'preview') {
-    badges.add('Preview');
-  } else if (classification.role === 'archive') {
-    badges.add('Archive');
-  } else if (classification.role === 'stem') {
-    badges.add('Stem');
-  } else if (classification.role === 'source') {
-    badges.add('Source');
-  }
-
-  return [...badges];
 }

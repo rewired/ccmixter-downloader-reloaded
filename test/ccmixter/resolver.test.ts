@@ -66,6 +66,49 @@ describe('CcmixterResolver', () => {
     expect(metadata.groups[0]?.warnings).toContain('No file candidates are available for this upload.');
   });
 
+  it('preserves ZIP contents discovered from the ccMixter API through HTML enrichment merge', () => {
+    const mapping = mapRawApiUpload({
+      upload_id: '9001',
+      upload_name: 'Test Song',
+      user_name: 'WiseMan',
+      user_real_name: 'Wiseman',
+      file_page_url: 'https://ccmixter.org/files/WiseMan/9001',
+      files: [
+        {
+          file_name: 'Song-stems.zip',
+          download_url: 'https://ccmixter.org/content/WiseMan/Song-stems.zip',
+          file_format_info: { zipdir: { files: ['/BASS.flac  (1.2MB)', '/VOCALS.flac  (2.1MB)'] } }
+        }
+      ]
+    });
+    const enrichment = {
+      sourceUrl: mapping.upload.sourceUrl,
+      tags: [],
+      fileCandidates: [
+        {
+          label: 'Song-stems.zip',
+          file: {
+            originalFilename: 'Song-stems.zip',
+            fileKind: 'archive' as const,
+            extension: 'zip',
+            downloadUrl: 'https://ccmixter.org/content/WiseMan/Song-stems.zip',
+            metadataSource: 'html-enriched' as const,
+            displayLabel: 'Song-stems.zip',
+            warnings: []
+          }
+        }
+      ],
+      zipFileHints: [],
+      relatedUploadUrls: [],
+      warnings: []
+    };
+
+    const [candidate] = buildGroupingCandidates([mapping], [enrichment]);
+    const mergedZip = candidate?.files.find((file) => file.originalFilename === 'Song-stems.zip');
+
+    expect(mergedZip?.zipFileHints).toEqual(['BASS.flac (1.2MB)', 'VOCALS.flac (2.1MB)']);
+  });
+
   it('groups same artist and normalized song title conservatively', () => {
     const groups = groupStemUploads(
       buildGroupingCandidates(parseCcmixterApiResponse(artistFixture).map((upload) => mapRawApiUpload(upload)))

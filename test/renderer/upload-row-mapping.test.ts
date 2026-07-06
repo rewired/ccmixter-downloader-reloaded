@@ -4,7 +4,7 @@ import { createDryRunPlanFromGroups, createReviewSessionFromDryRunPlan, type Ste
 import { toRawRow, toReviewRow } from '../../src/renderer/ui/UploadListDetail';
 
 describe('upload row mapping', () => {
-  it('maps a raw resolver group to a compact row without a tags field', () => {
+  it('maps a raw resolver group to a compact row of discovered files without a tags or badges field', () => {
     const group = stemGroup();
     const row = toRawRow(group);
 
@@ -14,14 +14,14 @@ describe('upload row mapping', () => {
       artist: 'Wiseman',
       bpm: 145,
       license: 'Attribution Noncommercial 4.0',
-      fileCount: 2,
-      badges: ['FLAC', 'Stem', 'MP3', 'Preview']
+      discoveredFileCount: 2
     });
     expect(row).not.toHaveProperty('tags');
     expect(row).not.toHaveProperty('sourceMode');
+    expect(row).not.toHaveProperty('badges');
   });
 
-  it('maps a review group to a compact row counting only included files and combined warnings', () => {
+  it('maps a review group to a compact row separating discovered files from selected files', () => {
     const plan = createDryRunPlanFromGroups('https://ccmixter.org/files/WiseMan/64501', root(), [stemGroup()], {
       createdAt: '2026-07-03T00:00:00.000Z',
       metadataSource: 'api',
@@ -36,11 +36,27 @@ describe('upload row mapping', () => {
     expect(row.title).toBe('Boxcar heading West (145 BPM)');
     expect(row.artist).toBe('Wiseman');
     expect(row.bpm).toBe(145);
-    expect(row.fileCount).toBe(1);
-    expect(row.badges).toEqual(['FLAC', 'Stem', 'MP3', 'Preview']);
+    expect(row.discoveredFileCount).toBe(2);
+    expect(row.selectedFileCount).toBe(0);
     expect(row).not.toHaveProperty('tags');
     expect(row).not.toHaveProperty('warningCount');
     expect(row).not.toHaveProperty('status');
+    expect(row).not.toHaveProperty('badges');
+  });
+
+  it('keeps a group with discovered files visible in review rows even when none are selected', () => {
+    const plan = createDryRunPlanFromGroups('https://ccmixter.org/files/WiseMan/64501', root(), [stemGroup()], {
+      createdAt: '2026-07-03T00:00:00.000Z',
+      metadataSource: 'api',
+      placeholderData: false,
+      resolverStatus: 'resolved',
+      warnings: []
+    });
+    const session = createReviewSessionFromDryRunPlan(plan);
+    const row = toReviewRow(session.groups[0]!);
+
+    expect(row.discoveredFileCount).toBeGreaterThan(0);
+    expect(row.selectedFileCount).toBe(0);
   });
 });
 

@@ -11,6 +11,7 @@ export function StatusBar({
   catalogCounts,
   scanPhase,
   plannedFileCount,
+  hasReviewSession,
   downloadStatus
 }: {
   stemLibraryRoot: StemLibraryRoot | null;
@@ -19,6 +20,7 @@ export function StatusBar({
   catalogCounts: ArtistCatalogCounts | null;
   scanPhase: ArtistCatalogScanPhase;
   plannedFileCount: number;
+  hasReviewSession: boolean;
   downloadStatus: 'dry-run' | 'ready' | 'downloading';
   status: Status;
 }): JSX.Element {
@@ -28,7 +30,7 @@ export function StatusBar({
     catalogCounts && catalogCounts.downloadableGroupCount > 0
       ? `Found ${catalogCounts.downloadableGroupCount} song${catalogCounts.downloadableGroupCount === 1 ? '' : 's'} - ${catalogCounts.downloadableFileCount} file${catalogCounts.downloadableFileCount === 1 ? '' : 's'}`
       : null;
-  const selectedText = plannedFileCount > 0 ? `${plannedFileCount} file${plannedFileCount === 1 ? '' : 's'} selected` : null;
+  const selectedText = hasReviewSession ? `${plannedFileCount} file${plannedFileCount === 1 ? '' : 's'} selected` : null;
   const stateText =
     downloadStatus === 'downloading'
       ? t('status.downloading')

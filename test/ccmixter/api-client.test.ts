@@ -148,6 +148,53 @@ describe('CcmixterApiClient mapping', () => {
     expect(result.warnings).toContain('No downloadable file candidates were mapped from recognized API fields.');
   });
 
+  it('reads file_nicname as an alternate display label and zipdir contents as zip file hints', () => {
+    const haze = parseCcmixterApiResponse(hazeFixture)[0]!;
+    const result = mapRawApiUpload(haze);
+    const stemsZip = result.files.find((file) => file.originalFilename === 'Zutsuri_-_Haze.zip');
+    const stemsZipFirstHalf = result.files.find((file) => file.originalFilename === 'Zutsuri_-_Haze_1.zip');
+    const previewMp3 = result.files.find((file) => file.originalFilename === 'Zutsuri_-_Haze_1.mp3');
+
+    expect(stemsZip?.displayLabel).toBe('Stems, Second Half');
+    expect(stemsZip?.zipFileHints).toEqual([
+      'haze - Vox 3.02_01-01.flac (927.47KB)',
+      'haze - Vox Dbl_01-05.flac (3.54MB)',
+      'haze - Vox Harmony 02.01_01-03.flac (3.32MB)',
+      'haze - Vox Harmony.04_01-03.flac (6.66MB)',
+      'haze - VOX PRE CHORUS_01.flac (873.21KB)',
+      'haze - Vox.01_01-15.flac (6.18MB)',
+      'haze - Wah EP BOUNCE.03_02.flac (12.22MB)'
+    ]);
+    expect(stemsZipFirstHalf?.displayLabel).toBe('Stems, First Half');
+    expect(stemsZipFirstHalf?.zipFileHints).toHaveLength(6);
+    // "mp3" is not a musician-facing name; the alternate label must not surface it as a display label.
+    expect(previewMp3?.displayLabel).toBe('mp3');
+  });
+
+  it('falls back to alternate filename/description fields and nested file_extra when file_nicname is absent', () => {
+    const rawUpload = {
+      upload_id: '9002',
+      upload_name: 'Test Song',
+      user_name: 'WiseMan',
+      files: [
+        {
+          file_name: 'a.wav',
+          download_url: 'https://ccmixter.org/content/WiseMan/a.wav',
+          alternate_filename: 'Alt Name A'
+        },
+        {
+          file_name: 'b.wav',
+          download_url: 'https://ccmixter.org/content/WiseMan/b.wav',
+          file_extra: { title: 'Alt Name B' }
+        }
+      ]
+    };
+    const result = mapRawApiUpload(rawUpload);
+
+    expect(result.files.find((file) => file.originalFilename === 'a.wav')?.displayLabel).toBe('Alt Name A');
+    expect(result.files.find((file) => file.originalFilename === 'b.wav')?.displayLabel).toBe('Alt Name B');
+  });
+
   it('maps recorded related upload links without recursively resolving them', () => {
     const haze = parseCcmixterApiResponse(hazeFixture)[0]!;
     const soundbitch = parseCcmixterApiResponse(soundbitchFixture)[0]!;

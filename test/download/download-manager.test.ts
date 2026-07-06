@@ -213,9 +213,10 @@ describe('DownloadManager', () => {
     review = renameGroup(review, review.groups[0]!.reviewGroupId, 'Haze smoke review');
 
     const previewFile = review.groups[0]!.files.find((file) => file.originalFile.fileKind === 'preview')!;
+    const missingUrlFile = review.groups[0]!.files.find((file) => file.originalFilename === 'fixture-missing-url.wav')!;
     review = toggleFileIncluded(review, previewFile.fileId);
+    review = toggleFileIncluded(review, missingUrlFile.fileId);
     const archiveFile = review.groups[0]!.files.find((file) => file.originalFile.fileKind === 'archive')!;
-    review = toggleFileIncluded(review, archiveFile.fileId);
     const reviewedPlan = buildReviewedDryRunPlan(review, dryRun.stemLibraryRoot);
     const manager = new DownloadManager({
       fetcher: fakeFetcher({

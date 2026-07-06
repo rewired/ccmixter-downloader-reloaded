@@ -601,6 +601,7 @@ export function App(): JSX.Element {
         catalogCounts={catalogCounts}
         scanPhase={scanPhase}
         plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
+        hasReviewSession={Boolean(reviewSession)}
         downloadStatus={downloadStatus}
         status={status}
       />

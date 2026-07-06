@@ -333,26 +333,41 @@ function mergeFiles(apiFiles: TrackFile[], enrichment: CcmixterHtmlEnrichment | 
   if (enrichment) {
     for (const candidate of enrichment.fileCandidates) {
       const existing = files.get(fileKey(candidate.file));
-      const zipFileHints = candidate.file.fileKind === 'archive' ? enrichment.zipFileHints : undefined;
+      const htmlZipFileHints = candidate.file.fileKind === 'archive' ? enrichment.zipFileHints : undefined;
 
       if (existing) {
         files.set(fileKey(existing), {
           ...existing,
           metadataSource: combineSource(existing.metadataSource, 'html-enriched'),
-          displayLabel: candidate.file.displayLabel ?? existing.displayLabel,
-          zipFileHints,
+          displayLabel: existing.displayLabel ?? candidate.file.displayLabel,
+          zipFileHints: mergeZipFileHints(existing.zipFileHints, htmlZipFileHints),
           warnings: [...existing.warnings, 'Matching HTML file candidate was found for this API file.']
         });
       } else {
         files.set(fileKey(candidate.file), {
           ...candidate.file,
-          zipFileHints
+          zipFileHints: mergeZipFileHints(candidate.file.zipFileHints, htmlZipFileHints)
         });
       }
     }
   }
 
   return [...files.values()];
+}
+
+// API-sourced ZIP contents (from file_format_info.zipdir.files) are more precise than the HTML
+// fallback's page-text scraping, so they must survive HTML enrichment rather than being overwritten
+// by it; when both are present, combine them instead of picking one.
+function mergeZipFileHints(apiHints: string[] | undefined, htmlHints: string[] | undefined): string[] | undefined {
+  if (!apiHints || apiHints.length === 0) {
+    return htmlHints;
+  }
+
+  if (!htmlHints || htmlHints.length === 0) {
+    return apiHints;
+  }
+
+  return [...new Set([...apiHints, ...htmlHints])];
 }
 
 function fileKey(file: TrackFile): string {

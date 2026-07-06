@@ -276,7 +276,10 @@ function mapFileRecord(record: unknown): TrackFile | null {
 
   const warnings = downloadUrl ? [] : ['File candidate did not include a recognized download URL field.'];
   const sizeBytes = numberFrom(record, ['file_size', 'size', 'size_bytes', 'file_rawsize']);
-  const file = buildTrackFile(filename, downloadUrl, 'api', warnings);
+  const file = buildTrackFile(filename, downloadUrl, 'api', warnings, {
+    displayLabel: alternateFileLabelFrom(record),
+    zipFileHints: zipFileHintsFrom(record)
+  });
 
   return {
     ...file,
@@ -284,11 +287,52 @@ function mapFileRecord(record: unknown): TrackFile | null {
   };
 }
 
+function alternateFileLabelFrom(record: RawCcmixterApiUpload): string | undefined {
+  const direct = stringFrom(record, [
+    'file_nicname',
+    'file_description',
+    'file_desc',
+    'alternate_description',
+    'alternate_filename',
+    'alternate_file_name',
+    'alt_filename',
+    'alt_file_name'
+  ]);
+
+  if (direct) {
+    return direct;
+  }
+
+  const fileExtra = record['file_extra'];
+  return isRecord(fileExtra) ? stringFrom(fileExtra, ['name', 'title', 'description', 'type']) : undefined;
+}
+
+// ccMixter's dataview=files/info responses can include the ZIP's own file listing under
+// file_format_info.zipdir.files, which lets the review UI show archive contents before download
+// without needing to fetch and inspect the archive itself.
+function zipFileHintsFrom(record: RawCcmixterApiUpload): string[] | undefined {
+  const formatInfo = record['file_format_info'];
+  const zipdir = isRecord(formatInfo) ? formatInfo['zipdir'] : undefined;
+  const files = isRecord(zipdir) ? zipdir['files'] : undefined;
+
+  if (!Array.isArray(files)) {
+    return undefined;
+  }
+
+  const normalized = files
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim().replace(/^\/+/, '').replace(/\s+/g, ' ').trim())
+    .filter((entry) => entry.length > 0);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 export function buildTrackFile(
   filename: string,
   downloadUrl: string | undefined,
   metadataSource: MetadataSourceType,
-  warnings: string[] = []
+  warnings: string[] = [],
+  options: { displayLabel?: string; zipFileHints?: string[] } = {}
 ): TrackFile {
   const extension = extensionFromFilename(filename);
 
@@ -297,6 +341,8 @@ export function buildTrackFile(
     fileKind: 'unknown',
     extension: extension ?? 'unknown',
     downloadUrl,
+    displayLabel: options.displayLabel,
+    zipFileHints: options.zipFileHints,
     metadataSource,
     warnings: extension ? warnings : [...warnings, 'File extension could not be determined.']
   });

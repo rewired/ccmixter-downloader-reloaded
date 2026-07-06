@@ -35,18 +35,27 @@ test('fixture:haze-smoke review and download smoke', async () => {
     await page.getByLabel('ccMixter artist or upload').fill('fixture:haze-smoke');
     await page.getByRole('button', { name: 'Scan source' }).click();
 
-    await expect(page.getByText(/files selected/).first()).toBeVisible();
-    await expect(page.locator('.candidate-badge').filter({ hasText: 'MP3' }).first()).toBeVisible();
-    await expect(page.locator('.candidate-badge').filter({ hasText: 'Archive' }).first()).toBeVisible();
+    await expect(page.getByText('0 files selected', { exact: true })).toBeVisible();
+    await expect(page.locator('.upload-list .candidate-badge')).toHaveCount(0);
     await expect(page.getByText('Developer actions')).not.toBeVisible();
     await expect(page.getByText('Merge into')).not.toBeVisible();
-    await expect(page.getByRole('button', { name: 'Preview archive contents' })).toBeVisible();
-    await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
 
     await page.getByLabel('Song folder').fill('Haze smoke review');
+    await expectWritableFiles(page, 0);
+
+    // Zutsuri_-_Haze.zip carries recorded ccMixter ZIP contents; selecting it should reveal them.
+    await fileRow(page, 'Zutsuri_-_Haze.zip').getByRole('checkbox').check();
     await expectWritableFiles(page, 1);
+    await expect(page.getByText('2 files inside')).toBeVisible();
+    await page.getByText('2 files inside').click();
+    await expect(page.getByText('haze - Vox 3.02_01-01.flac')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview archive contents' })).toBeVisible();
 
     await fileRow(page, 'Zutsuri_-_Haze_1.mp3').getByRole('checkbox').check();
+    await expectWritableFiles(page, 2);
+
+    await fileRow(page, 'fixture-missing-url.wav').getByRole('checkbox').check();
+    await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
     await expectWritableFiles(page, 2);
 
     await fileRow(page, 'Zutsuri_-_Haze.zip').getByRole('checkbox').uncheck();
@@ -76,7 +85,7 @@ async function expectWritableFiles(page: Page, count: number): Promise<void> {
 }
 
 function fileRow(page: Page, filename: string) {
-  return page.locator(`.candidate-list > li:has(input[value="${cssAttributeValue(filename)}"])`);
+  return page.locator(`.candidate-list > li[data-filename="${cssAttributeValue(filename)}"]`);
 }
 
 function downloadFileRow(page: Page, filename: string) {

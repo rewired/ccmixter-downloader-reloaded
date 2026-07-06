@@ -16,14 +16,15 @@ import {
 } from '../../src/shared/domain';
 
 describe('download job planning', () => {
-  it('creates jobs from reviewed dry-run planned files and omits excluded files', () => {
+  it('creates jobs from reviewed dry-run planned files and omits files that are not explicitly included', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan());
-    const excludedFileId = session.groups[0]!.files[0]!.fileId;
-    const reviewed = toggleFileIncluded(session, excludedFileId);
+    const bassFileId = session.groups[0]!.files[0]!.fileId;
+    const vocalsFileId = session.groups[1]!.files[0]!.fileId;
+    const reviewed = toggleFileIncluded(toggleFileIncluded(session, bassFileId), vocalsFileId);
     const plan = reviewedPlan(reviewed);
     const job = createDownloadJobFromReviewedPlan(plan, { jobId: 'job-a', createdAt: '2026-07-03T00:00:00.000Z' });
 
-    expect(job.files.map((file) => file.originalFilename)).toEqual(['VOCALS.flac']);
+    expect(job.files.map((file) => file.originalFilename)).toEqual(['BASS.flac', 'VOCALS.flac']);
     expect(job.files.every((file) => file.status === 'queued')).toBe(true);
   });
 
@@ -69,7 +70,7 @@ describe('download job planning', () => {
   it('keeps Windows reserved names sanitized in target paths', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan());
     const fileId = session.groups[0]!.files[0]!.fileId;
-    const reviewed = renameFile(session, fileId, 'CON.wav');
+    const reviewed = renameFile(toggleFileIncluded(session, fileId), fileId, 'CON.wav');
     const job = createDownloadJobFromReviewedPlan(reviewedPlan(reviewed), { jobId: 'job-a' });
 
     expect(job.files[0]?.targetRelativePath).toContain('_CON.wav');

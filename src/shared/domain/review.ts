@@ -283,6 +283,8 @@ export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: Stem
 }
 
 function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): ReviewGroup {
+  const files = ensureUniqueTargetFilenames(group.files.map((file, index) => createReviewFile(reviewGroupId, file, index, false)));
+
   return {
     reviewGroupId,
     originalGroupId: group.groupId,
@@ -290,7 +292,7 @@ function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): Rev
     artistName: group.artist,
     songFolderName: buildSongFolderName(group.canonicalSongTitle, group.bpm),
     status: 'needs-review',
-    files: group.files.map((file, index) => createReviewFile(reviewGroupId, file, index, defaultFileIncluded(file))),
+    files,
     overrides: [],
     overrideWarnings: [],
     warnings: group.warnings,
@@ -303,15 +305,77 @@ function createReviewFile(groupId: string, file: TrackFile, index: number, inclu
     fileId: `${groupId}::file::${index}`,
     originalFile: file,
     originalFilename: file.originalFilename,
-    targetFilename: file.originalFilename,
+    targetFilename: buildDefaultTargetFilename(file),
     included,
     overrideWarnings: [],
     warnings: file.warnings
   };
 }
 
-function defaultFileIncluded(file: TrackFile): boolean {
-  return getDownloadCandidateClassification(file).role !== 'preview';
+// ccMixter's file_nicname/description fields are often a much more musician-readable name than the
+// technical originalFilename (e.g. "Stems, Second Half" vs "Zutsuri_-_Haze.zip"), so the default
+// target filename prefers it when it adds information beyond the bare extension.
+function buildDefaultTargetFilename(file: TrackFile): string {
+  const label = usefulDisplayLabel(file);
+
+  if (!label) {
+    return file.originalFilename;
+  }
+
+  const sanitizedBase = sanitizePathSegment(label);
+  const extension = file.extension && file.extension !== 'unknown' ? file.extension : undefined;
+
+  return extension ? `${sanitizedBase}.${extension}` : sanitizedBase;
+}
+
+function usefulDisplayLabel(file: TrackFile): string | undefined {
+  const label = file.displayLabel?.trim();
+
+  if (!label) {
+    return undefined;
+  }
+
+  const extension = file.extension?.toLowerCase();
+  const strippedLabel = extension && label.toLowerCase().endsWith(`.${extension}`) ? label.slice(0, label.length - extension.length - 1).trim() : label;
+
+  if (strippedLabel.length === 0) {
+    return undefined;
+  }
+
+  if (extension && strippedLabel.toLowerCase() === extension) {
+    return undefined;
+  }
+
+  if (strippedLabel.toLowerCase() === file.originalFilename.toLowerCase()) {
+    return undefined;
+  }
+
+  return strippedLabel;
+}
+
+// Alternate labels can collide across files in the same group (e.g. two archives both nicnamed
+// "Stems"), so give later duplicates a stable, deterministic suffix instead of silently overwriting
+// each other's download target.
+function ensureUniqueTargetFilenames(files: ReviewFile[]): ReviewFile[] {
+  const seenCounts = new Map<string, number>();
+
+  return files.map((file) => {
+    const key = file.targetFilename.toLowerCase();
+    const priorCount = seenCounts.get(key) ?? 0;
+    seenCounts.set(key, priorCount + 1);
+
+    return priorCount === 0 ? file : { ...file, targetFilename: appendStableSuffix(file.targetFilename, priorCount + 1) };
+  });
+}
+
+function appendStableSuffix(filename: string, suffix: number): string {
+  const dotIndex = filename.lastIndexOf('.');
+
+  if (dotIndex <= 0) {
+    return `${filename} (${suffix})`;
+  }
+
+  return `${filename.slice(0, dotIndex)} (${suffix})${filename.slice(dotIndex)}`;
 }
 
 function toReviewedStemGroup(group: ReviewGroup): StemGroup {
