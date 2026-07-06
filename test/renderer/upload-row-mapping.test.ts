@@ -36,7 +36,7 @@ describe('upload row mapping', () => {
     expect(row.title).toBe('Boxcar heading West (145 BPM)');
     expect(row.artist).toBe('Wiseman');
     expect(row.bpm).toBe(145);
-    expect(row.fileCount).toBe(2);
+    expect(row.fileCount).toBe(1);
     expect(row.badges).toEqual(['FLAC', 'Stem', 'MP3', 'Preview']);
     expect(row).not.toHaveProperty('tags');
     expect(row).not.toHaveProperty('warningCount');

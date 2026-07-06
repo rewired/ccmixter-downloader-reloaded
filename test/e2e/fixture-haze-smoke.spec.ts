@@ -44,6 +44,9 @@ test('fixture:haze-smoke review and download smoke', async () => {
     await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
 
     await page.getByLabel('Song folder').fill('Haze smoke review');
+    await expectWritableFiles(page, 1);
+
+    await fileRow(page, 'Zutsuri_-_Haze_1.mp3').getByRole('checkbox').check();
     await expectWritableFiles(page, 2);
 
     await fileRow(page, 'Zutsuri_-_Haze.zip').getByRole('checkbox').uncheck();

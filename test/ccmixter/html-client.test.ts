@@ -4,10 +4,106 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CcmixterHtmlClient,
   parseCatalogViewingRange,
   parseCcmixterArtistCatalogHtml,
   parseCcmixterUploadHtml
 } from '../../src/main/services/ccmixter/ccmixterHtmlClient';
+
+describe('CcmixterHtmlClient download action file resolution', () => {
+  const pageUrl = 'https://ccmixter.org/files/JeffSpeed68/70836';
+  const noFileHtml = '<html><body><td id="upload_menu_box"></td></body></html>';
+
+  it('resolves file candidates via the ccMixter download action when the static page exposes none', async () => {
+    const client = new CcmixterHtmlClient({
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.startsWith(pageUrl)) {
+          return jsonOrTextResponse(noFileHtml, 'text/html');
+        }
+
+        expect(url).toContain('dataview=files');
+        expect(url).toContain('ids=70836');
+
+        return jsonOrTextResponse(
+          JSON.stringify([
+            {
+              upload_id: 70836,
+              user_name: 'JeffSpeed68',
+              upload_name: 'Cold Current',
+              files: [
+                {
+                  file_name: 'JeffSpeed68_-_Cold_Current.mp3',
+                  download_url: 'https://ccmixter.org/content/JeffSpeed68/JeffSpeed68_-_Cold_Current.mp3'
+                },
+                {
+                  file_name: 'JeffSpeed68_-_Cold_Current.flac',
+                  download_url: 'https://ccmixter.org/content/JeffSpeed68/JeffSpeed68_-_Cold_Current.flac'
+                }
+              ]
+            }
+          ]),
+          'application/json'
+        );
+      }) as typeof fetch
+    });
+
+    const enrichment = await client.enrichUploadPage(pageUrl);
+
+    expect(enrichment.fileCandidates.map((candidate) => candidate.file.originalFilename)).toEqual([
+      'JeffSpeed68_-_Cold_Current.mp3',
+      'JeffSpeed68_-_Cold_Current.flac'
+    ]);
+    expect(enrichment.fileCandidates.every((candidate) => typeof candidate.file.downloadUrl === 'string')).toBe(true);
+    expect(enrichment.warnings).not.toContain('HTML enrichment did not find visible downloadable file candidates.');
+  });
+
+  it('falls back to whatever the static page found when the download action lookup fails', async () => {
+    const client = new CcmixterHtmlClient({
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.startsWith(pageUrl)) {
+          return jsonOrTextResponse(noFileHtml, 'text/html');
+        }
+
+        throw new Error('network unreachable');
+      }) as typeof fetch
+    });
+
+    const enrichment = await client.enrichUploadPage(pageUrl);
+
+    expect(enrichment.fileCandidates).toEqual([]);
+    expect(enrichment.warnings).toContain('HTML enrichment did not find visible downloadable file candidates.');
+  });
+
+  it('does not call the download action lookup when the static page already exposes enough file candidates', async () => {
+    const html = await readFile(path.resolve('test/fixtures/ccmixter/upload-page.html'), 'utf8');
+    const client = new CcmixterHtmlClient({
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const url = input.toString();
+
+        if (url.startsWith(pageUrl)) {
+          return jsonOrTextResponse(html, 'text/html');
+        }
+
+        throw new Error('download action lookup should not have been called');
+      }) as typeof fetch
+    });
+
+    const enrichment = await client.enrichUploadPage(pageUrl);
+
+    expect(enrichment.fileCandidates.map((candidate) => candidate.file.originalFilename)).toEqual([
+      'GUITAR-main.flac',
+      'Boxcar-stems.zip'
+    ]);
+  });
+});
+
+function jsonOrTextResponse(body: string, contentType: string): Response {
+  return new Response(body, { status: 200, headers: { 'content-type': contentType } });
+}
 
 describe('parseCcmixterUploadHtml', () => {
   it('extracts conservative metadata from an upload-page fixture', async () => {

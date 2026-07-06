@@ -1,4 +1,4 @@
-import { buildTrackFile, mapRawApiUpload } from './ccmixterApiClient';
+import { buildCcmixterQueryUrl, buildTrackFile, mapRawApiUpload, parseCcmixterApiResponse } from './ccmixterApiClient';
 import type {
   CcmixterHtmlCatalogResult,
   CcmixterHtmlClientOptions,
@@ -10,6 +10,16 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const FILE_LINK_PATTERN = /\.(?:mp3|flac|wav|aif|aiff|ogg|m4a|zip)(?:[?#][^"'\s<>]*)?$/i;
 const BPM_PATTERN = /\b(?:bpm|tempo)\s*:?\s*(\d{2,3})\b|\b(\d{2,3})\s*bpm\b/i;
 const CC_LICENSE_PATTERN = /Creative\s+Commons\s+[^<\n\r]+|CC\s+BY(?:-[A-Z]+)?(?:\s+\d(?:\.\d)?)?/i;
+const UPLOAD_ID_FROM_URL_PATTERN = /\/files\/[^/?#]+\/(\d+)/i;
+// ccMixter upload pages never link real audio/archive files with a static, extension-terminated
+// href: the "Download (N files)" action (class="download_hook") is a javascript:// stub that a
+// follow-up AJAX call resolves client-side, so it can't be discovered by parsing the fetched page
+// text alone. Falling back to ccMixter's own file-listing API (the same data source that download
+// action itself resolves through) is the only reliable way to discover those candidates from a
+// server-side HTML fetch.
+const MIN_STATIC_FILE_CANDIDATES_BEFORE_SKIPPING_DOWNLOAD_ACTION_LOOKUP = 2;
+const DOWNLOAD_ACTION_FILE_NOTE = "File candidate was resolved from this upload page's ccMixter download action.";
+const NO_VISIBLE_FILE_CANDIDATES_WARNING = 'HTML enrichment did not find visible downloadable file candidates.';
 
 export class CcmixterHtmlClient {
   private readonly fetchImpl: typeof fetch;
@@ -22,7 +32,8 @@ export class CcmixterHtmlClient {
 
   async enrichUploadPage(sourceUrl: string): Promise<CcmixterHtmlEnrichment> {
     const html = await this.fetchHtml(sourceUrl, 'ccMixter HTML upload page request');
-    return parseCcmixterUploadHtml(html, sourceUrl);
+    const enrichment = parseCcmixterUploadHtml(html, sourceUrl);
+    return this.resolveDownloadActionFileCandidates(enrichment, sourceUrl);
   }
 
   async resolveArtistCatalogPage(sourceUrl: string, artistLogin: string): Promise<CcmixterHtmlCatalogResult> {
@@ -58,6 +69,96 @@ export class CcmixterHtmlClient {
       clearTimeout(timeout);
     }
   }
+
+  // Best-effort supplement: an upload page whose visible download action didn't yield enough static
+  // file candidates gets a follow-up lookup against ccMixter's own file-listing API (the same
+  // authoritative source that action resolves through client-side). Any failure here is swallowed so
+  // enrichment still returns whatever the static HTML parse already found.
+  private async resolveDownloadActionFileCandidates(
+    enrichment: CcmixterHtmlEnrichment,
+    sourceUrl: string
+  ): Promise<CcmixterHtmlEnrichment> {
+    if (enrichment.fileCandidates.length >= MIN_STATIC_FILE_CANDIDATES_BEFORE_SKIPPING_DOWNLOAD_ACTION_LOOKUP) {
+      return enrichment;
+    }
+
+    const uploadId = extractUploadIdFromSourceUrl(sourceUrl);
+    if (!uploadId) {
+      return enrichment;
+    }
+
+    try {
+      const url = buildCcmixterQueryUrl({ uploadId, dataview: 'files' });
+      const response = await this.fetchJson(url, 'ccMixter download action file lookup');
+      const [rawUpload] = parseCcmixterApiResponse(response);
+
+      if (!rawUpload) {
+        return enrichment;
+      }
+
+      const resolvedFiles = mapRawApiUpload(rawUpload).files;
+      if (resolvedFiles.length === 0) {
+        return enrichment;
+      }
+
+      const resolvedCandidates: HtmlFileCandidate[] = resolvedFiles.map((file) => ({
+        label: file.originalFilename,
+        file: {
+          ...file,
+          displayLabel: file.originalFilename,
+          warnings: [...file.warnings, DOWNLOAD_ACTION_FILE_NOTE]
+        }
+      }));
+
+      return {
+        ...enrichment,
+        fileCandidates: mergeFileCandidatesByFilename(resolvedCandidates, enrichment.fileCandidates),
+        warnings: enrichment.warnings.filter((warning) => warning !== NO_VISIBLE_FILE_CANDIDATES_WARNING)
+      };
+    } catch {
+      return enrichment;
+    }
+  }
+
+  private async fetchJson(url: URL, requestDescription: string): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await this.fetchImpl(url.toString(), {
+        headers: {
+          accept: 'application/json'
+        },
+        credentials: 'omit',
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`${requestDescription} failed for ${url.toString()}: request timed out after ${this.timeoutMs} ms.`);
+      }
+
+      throw new Error(`${requestDescription} failed for ${url.toString()}: ${errorMessage(error)}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function extractUploadIdFromSourceUrl(sourceUrl: string): string | undefined {
+  return UPLOAD_ID_FROM_URL_PATTERN.exec(sourceUrl)?.[1];
+}
+
+function mergeFileCandidatesByFilename(primary: HtmlFileCandidate[], fallback: HtmlFileCandidate[]): HtmlFileCandidate[] {
+  const seen = new Set(primary.map((candidate) => candidate.file.originalFilename.toLowerCase()));
+  const remainingFallback = fallback.filter((candidate) => !seen.has(candidate.file.originalFilename.toLowerCase()));
+
+  return [...primary, ...remainingFallback];
 }
 
 export function parseCcmixterArtistCatalogHtml(
@@ -147,7 +248,7 @@ export function parseCcmixterUploadHtml(html: string, sourceUrl?: string): Ccmix
   }
 
   if (fileCandidates.length === 0) {
-    warnings.push('HTML enrichment did not find visible downloadable file candidates.');
+    warnings.push(NO_VISIBLE_FILE_CANDIDATES_WARNING);
   }
 
   return {

@@ -67,42 +67,43 @@ describe('review session overrides', () => {
 
   it('excludes files from reviewed planned files while keeping them visible in review state', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan());
-    const fileId = session.groups[0]!.files[1]!.fileId;
+    const fileId = session.groups[0]!.files[0]!.fileId;
     const updated = toggleFileIncluded(session, fileId);
     const plan = buildReviewedDryRunPlan(updated, root());
 
-    expect(updated.groups[0]?.files[1]?.included).toBe(false);
+    expect(updated.groups[0]?.files[0]?.included).toBe(false);
     expect(updated.groups[0]?.files).toHaveLength(2);
+    expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).not.toContain('BASS.flac');
     expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).not.toContain('preview.mp3');
   });
 
-  it('selects artist catalog review files by default while keeping them visible', () => {
+  it('selects source/stem/archive review files by default but not preview files', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan('WiseMan'));
 
     expect(session.sourcePlan.input.kind).toBe('artist-name');
-    expect(session.groups[0]?.files.map((file) => file.included)).toEqual([true, true]);
+    expect(session.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
     expect(session.groups[1]?.files.map((file) => file.included)).toEqual([true]);
   });
 
-  it('keeps upload-link, upload-id, and fixture review files included by default', () => {
+  it('keeps upload-link, upload-id, and fixture review files defaulted the same musician-facing way', () => {
     const uploadLinkSession = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/files/WiseMan/64501'));
     const uploadIdSession = createReviewSessionFromDryRunPlan(createPlan('64501'));
     const fixtureSession = createReviewSessionFromDryRunPlan(createPlan('fixture:haze-smoke'));
 
     expect(uploadLinkSession.sourcePlan.input.kind).toBe('upload-link');
-    expect(uploadLinkSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+    expect(uploadLinkSession.groups.flatMap((group) => group.files).map((file) => file.included)).toEqual([true, false, true]);
     expect(uploadIdSession.sourcePlan.input.kind).toBe('upload-id');
-    expect(uploadIdSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+    expect(uploadIdSession.groups.flatMap((group) => group.files).map((file) => file.included)).toEqual([true, false, true]);
     expect(fixtureSession.sourcePlan.input.kind).toBe('fixture');
-    expect(fixtureSession.groups.flatMap((group) => group.files).every((file) => file.included)).toBe(true);
+    expect(fixtureSession.groups.flatMap((group) => group.files).map((file) => file.included)).toEqual([true, false, true]);
   });
 
-  it('plans all discovered files from an untouched artist catalog review', () => {
+  it('plans only default-selected files from an untouched artist catalog review', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan('https://ccmixter.org/people/WiseMan'));
     const plan = buildReviewedDryRunPlan(session, root());
 
     expect(session.sourcePlan.input.kind).toBe('artist-link');
-    expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).toEqual(['BASS.flac', 'preview.mp3', 'VOCALS.flac']);
+    expect(plan.plannedFiles.map((file) => file.sourceFile.originalFilename)).toEqual(['BASS.flac', 'VOCALS.flac']);
     expect(plan.warnings).not.toContain('No files are included in the reviewed dry-run plan.');
   });
 
@@ -115,7 +116,7 @@ describe('review session overrides', () => {
     expect(recommended.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
     expect(recommended.groups[1]?.files.map((file) => file.included)).toEqual([true]);
     expect(withoutPreviews.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
-    expect(withoutArchives.groups[0]?.files.map((file) => file.included)).toEqual([true, true, false]);
+    expect(withoutArchives.groups[0]?.files.map((file) => file.included)).toEqual([true, false, false]);
   });
 
   it('marks groups accepted and needs review without removing low-confidence warnings', () => {

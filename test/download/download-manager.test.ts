@@ -212,6 +212,8 @@ describe('DownloadManager', () => {
     let review = createReviewSessionFromDryRunPlan(dryRun);
     review = renameGroup(review, review.groups[0]!.reviewGroupId, 'Haze smoke review');
 
+    const previewFile = review.groups[0]!.files.find((file) => file.originalFile.fileKind === 'preview')!;
+    review = toggleFileIncluded(review, previewFile.fileId);
     const archiveFile = review.groups[0]!.files.find((file) => file.originalFile.fileKind === 'archive')!;
     review = toggleFileIncluded(review, archiveFile.fileId);
     const reviewedPlan = buildReviewedDryRunPlan(review, dryRun.stemLibraryRoot);

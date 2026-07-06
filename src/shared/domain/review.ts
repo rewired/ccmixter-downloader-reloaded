@@ -14,7 +14,7 @@ import { getDownloadCandidateClassification, isRecommendedDownloadCandidate } fr
 import { buildSongFolderName, sanitizePathSegment } from './planning';
 
 export function createReviewSessionFromDryRunPlan(plan: DryRunPlan): ReviewSession {
-  const groups = plan.groups.map((group) => createReviewGroup(group, undefined, true));
+  const groups = plan.groups.map((group) => createReviewGroup(group));
 
   return {
     reviewSessionId: `review-${plan.createdAt}`,
@@ -231,7 +231,7 @@ export function mergeGroups(session: ReviewSession, sourceGroupId: string, targe
 }
 
 export function resetGroupOverrides(session: ReviewSession, groupId: string): ReviewSession {
-  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId, true));
+  return updateGroupWithGroupOverride(session, groupId, 'reset', (group) => createReviewGroup(group.originalGroup, group.reviewGroupId));
 }
 
 export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: StemLibraryRoot): DryRunPlan {
@@ -282,7 +282,7 @@ export function buildReviewedDryRunPlan(session: ReviewSession, rootFolder: Stem
   };
 }
 
-function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId, defaultIncluded = true): ReviewGroup {
+function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId): ReviewGroup {
   return {
     reviewGroupId,
     originalGroupId: group.groupId,
@@ -290,7 +290,7 @@ function createReviewGroup(group: StemGroup, reviewGroupId = group.groupId, defa
     artistName: group.artist,
     songFolderName: buildSongFolderName(group.canonicalSongTitle, group.bpm),
     status: 'needs-review',
-    files: group.files.map((file, index) => createReviewFile(reviewGroupId, file, index, defaultIncluded)),
+    files: group.files.map((file, index) => createReviewFile(reviewGroupId, file, index, defaultFileIncluded(file))),
     overrides: [],
     overrideWarnings: [],
     warnings: group.warnings,
@@ -308,6 +308,10 @@ function createReviewFile(groupId: string, file: TrackFile, index: number, inclu
     overrideWarnings: [],
     warnings: file.warnings
   };
+}
+
+function defaultFileIncluded(file: TrackFile): boolean {
+  return getDownloadCandidateClassification(file).role !== 'preview';
 }
 
 function toReviewedStemGroup(group: ReviewGroup): StemGroup {

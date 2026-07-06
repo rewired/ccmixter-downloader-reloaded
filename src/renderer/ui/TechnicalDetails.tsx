@@ -1,4 +1,4 @@
-import type { CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata } from '../../shared/domain';
+import type { CcmixterInput, DryRunPlan, ResolvedCcmixterMetadata, ReviewSession } from '../../shared/domain';
 import { t } from '../i18n';
 import { resolveArtistCatalogStatus, type ArtistCatalogCounts } from './catalogStatus';
 
@@ -8,6 +8,7 @@ export function TechnicalDetails({
   parsedInput,
   dryRunPlan,
   resolvedMetadata,
+  reviewSession,
   catalogCounts,
   catalogIsLoadingMore,
   hasMore,
@@ -19,6 +20,7 @@ export function TechnicalDetails({
   parsedInput: CcmixterInput | null;
   dryRunPlan: DryRunPlan | null;
   resolvedMetadata: ResolvedCcmixterMetadata | null;
+  reviewSession: ReviewSession | null;
   catalogCounts: ArtistCatalogCounts | null;
   catalogIsLoadingMore: boolean;
   hasMore: boolean;
@@ -30,7 +32,12 @@ export function TechnicalDetails({
   const catalogStatus = catalogCounts
     ? resolveArtistCatalogStatus(hasMore, catalogCounts.loadedCount, catalogCounts.totalCount, catalogIsLoadingMore, pagingIncomplete)
     : null;
-  const warnings = [...(parsedInput?.warnings ?? []), ...(dryRunPlan?.warnings ?? resolvedMetadata?.warnings ?? [])].filter(unique);
+  const groupWarnings = (reviewSession?.groups ?? []).flatMap((group) =>
+    [...group.warnings, ...group.overrideWarnings].map((warning) => `${group.songFolderName}: ${warning}`)
+  );
+  const warnings = [...(parsedInput?.warnings ?? []), ...(dryRunPlan?.warnings ?? resolvedMetadata?.warnings ?? []), ...groupWarnings].filter(
+    unique
+  );
 
   return (
     <details className="technical-details">

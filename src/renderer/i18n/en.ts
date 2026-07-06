@@ -22,7 +22,6 @@ export const en = {
   'review.targetFileName': 'Target file name',
   'review.originalFileName': 'Original file name',
   'review.files': 'Files',
-  'review.folderPreview': 'Folder preview',
   'download.title': 'Download',
   'download.prepare': 'Prepare download',
   'download.start': 'Start download',

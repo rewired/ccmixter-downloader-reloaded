@@ -547,6 +547,7 @@ export function App(): JSX.Element {
           parsedInput={parsedInput}
           dryRunPlan={dryRunPlan}
           resolvedMetadata={resolvedMetadata}
+          reviewSession={reviewSession}
           catalogCounts={catalogCounts}
           catalogIsLoadingMore={catalogIsLoadingMore}
           hasMore={catalogSessionState?.hasMore ?? false}

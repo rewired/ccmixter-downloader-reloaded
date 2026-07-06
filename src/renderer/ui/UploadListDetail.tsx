@@ -14,6 +14,8 @@ import {
 } from '../../shared/domain';
 import { t } from '../i18n';
 
+import { LicenseBadge } from './LicenseBadge';
+
 export interface UploadRow {
   id: string;
   title: string;
@@ -103,7 +105,7 @@ export function UploadListDetail({
                   <div className="upload-list-row__meta">
                     <span>{row.artist}</span>
                     {typeof row.bpm === 'number' ? <span>{row.bpm} BPM</span> : null}
-                    {row.license ? <span>{row.license}</span> : null}
+                    {row.license ? <LicenseBadge licenseSummary={row.license} /> : null}
                   </div>
                   {row.badges.length > 0 ? (
                     <div className="candidate-badges">
@@ -156,29 +158,26 @@ function ReviewGroupDetail({
   group: ReviewGroup;
   onChange: (session: ReviewSession) => void;
 }): JSX.Element {
+  const firstUpload = group.originalGroup.uploads[0];
+
   return (
     <section className="upload-detail" aria-label="Selected song files">
-      <div className="group-heading">
-        <div>
-          <h2>{group.songFolderName}</h2>
-          <span>by {group.artistName}</span>
-        </div>
+      <div className="detail-heading">
+        <h2>
+          {group.songFolderName} <span className="detail-heading__artist">by {group.artistName}</span>
+        </h2>
+        {firstUpload?.licenseSummary ? <LicenseBadge licenseSummary={firstUpload.licenseSummary} /> : null}
       </div>
 
-      <div className="folder-preview">
-        <span className="field-label">{t('review.folderPreview')}</span>
-        <code>{group.artistName}/{group.songFolderName}</code>
-      </div>
-
-      <div className="edit-grid secondary-edit-grid">
-        <label className="field">
+      <div className="compact-fields">
+        <label className="compact-field">
           <span>{t('review.artistFolder')}</span>
           <input
             value={group.artistName}
             onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
           />
         </label>
-        <label className="field">
+        <label className="compact-field">
           <span>{t('review.songFolder')}</span>
           <input
             value={group.songFolderName}
@@ -203,10 +202,15 @@ function ReviewGroupDetail({
               {file.targetFilename !== file.originalFilename ? <small>{t('review.originalFileName')}: {file.originalFilename}</small> : null}
               <label className="field file-name-field">
                 <span>{t('review.targetFileName')}</span>
-                <input
-                  value={file.targetFilename}
-                  onChange={(event) => onChange(renameFile(reviewSession, file.fileId, event.target.value))}
-                />
+                <span className="file-rename-row">
+                  <input
+                    value={fileBaseName(file)}
+                    onChange={(event) =>
+                      onChange(renameFile(reviewSession, file.fileId, composeFilename(event.target.value, fileExtension(file))))
+                    }
+                  />
+                  {fileExtension(file) ? <span className="file-rename-ext">.{fileExtension(file)}</span> : null}
+                </span>
               </label>
               <CandidateBadges file={file.originalFile} />
               {file.overrideWarnings.length > 0 ? <p className="user-note">This file name will be adjusted for your file system.</p> : null}
@@ -214,12 +218,25 @@ function ReviewGroupDetail({
           ))}
         </ul>
       </div>
-
-      {group.warnings.length > 0 || group.overrideWarnings.length > 0 ? (
-        <p className="user-note">Some metadata could not be verified.</p>
-      ) : null}
     </section>
   );
+}
+
+function fileExtension(file: ReviewFile): string {
+  return file.originalFile.extension ?? '';
+}
+
+function fileBaseName(file: ReviewFile): string {
+  const extension = fileExtension(file);
+  const suffix = extension ? `.${extension}` : '';
+
+  return suffix.length > 0 && file.targetFilename.toLowerCase().endsWith(suffix.toLowerCase())
+    ? file.targetFilename.slice(0, file.targetFilename.length - suffix.length)
+    : file.targetFilename;
+}
+
+function composeFilename(baseName: string, extension: string): string {
+  return extension ? `${baseName}.${extension}` : baseName;
 }
 
 function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
@@ -227,20 +244,16 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
 
   return (
     <section className="upload-detail" aria-label="Selected song files">
-      <div className="group-heading">
-        <div>
-          <h2>{group.canonicalSongTitle}</h2>
-          <span>by {group.artist}</span>
-        </div>
+      <div className="detail-heading">
+        <h2>
+          {group.canonicalSongTitle} <span className="detail-heading__artist">by {group.artist}</span>
+        </h2>
+        <LicenseBadge licenseSummary={firstUpload?.licenseSummary} />
       </div>
       <dl className="details compact">
         <div>
           <dt>BPM</dt>
           <dd>{group.bpm ?? 'not specified'}</dd>
-        </div>
-        <div>
-          <dt>License</dt>
-          <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
         </div>
       </dl>
       <ul className="candidate-list">

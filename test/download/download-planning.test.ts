@@ -18,12 +18,12 @@ import {
 describe('download job planning', () => {
   it('creates jobs from reviewed dry-run planned files and omits excluded files', () => {
     const session = createReviewSessionFromDryRunPlan(createPlan());
-    const excludedFileId = session.groups[0]!.files[1]!.fileId;
+    const excludedFileId = session.groups[0]!.files[0]!.fileId;
     const reviewed = toggleFileIncluded(session, excludedFileId);
     const plan = reviewedPlan(reviewed);
     const job = createDownloadJobFromReviewedPlan(plan, { jobId: 'job-a', createdAt: '2026-07-03T00:00:00.000Z' });
 
-    expect(job.files.map((file) => file.originalFilename)).toEqual(['BASS.flac', 'VOCALS.flac']);
+    expect(job.files.map((file) => file.originalFilename)).toEqual(['VOCALS.flac']);
     expect(job.files.every((file) => file.status === 'queued')).toBe(true);
   });
 

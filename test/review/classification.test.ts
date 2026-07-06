@@ -88,7 +88,7 @@ describe('download candidate classification', () => {
     expect(plan.plannedFiles.every((plannedFile) => plannedFile.sourceFile.classification!.reasons.length > 0)).toBe(true);
   });
 
-  it('selects artist catalog files by default', () => {
+  it('does not select preview files from an artist catalog by default', () => {
     const session = createReviewSessionFromDryRunPlan(
       createDryRunPlanFromGroups('airtone', root(), [catalogGroup()], {
         createdAt: '2026-07-03T00:00:00.000Z',
@@ -100,7 +100,7 @@ describe('download candidate classification', () => {
     );
 
     expect(session.sourcePlan.input.kind).toBe('artist-name');
-    expect(session.groups.flatMap((group) => group.files).map((reviewFile) => reviewFile.included)).toEqual([true]);
+    expect(session.groups.flatMap((group) => group.files).map((reviewFile) => reviewFile.included)).toEqual([false]);
   });
 });
 
