@@ -94,7 +94,7 @@ Work Guidance must reflect current project standards or user instructions. Leave
 
 * Durable behavior changes requested by the user must be recorded in this root file or the relevant child `AGENTS.md`.
 * The user requested DOX as a durable project workflow: re-read applicable `AGENTS.md` chains before editing, update owning docs after meaningful changes, and keep child indexes current.
-* The current UI color/design direction (see `docs/DESIGN.md`) is accepted; future UI work should preserve it and only tune typography/density unless the user explicitly asks for a redesign.
+* The current UI color/design direction (see `docs/DESIGN.md`) is accepted; future UI work should preserve it, keep existing font sizes unchanged unless explicitly requested, and only tune font weights/density unless the user explicitly asks for a redesign.
 
 ## Working Principles
 

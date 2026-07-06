@@ -1,31 +1,37 @@
 :root {
-  --color-bg: #f5f7f8;
-  --color-panel: #ffffff;
-  --color-panel-alt: #f8fafb;
-  --color-border: #d8e0e4;
-  --color-border-strong: #b8c4ca;
-  --color-text: #1d2327;
-  --color-muted: #5b6770;
-  --color-accent: #1d5c63;
-  --color-accent-soft: #eef5f6;
-  --color-accent-soft-border: #c8dce0;
-  --color-warning-bg: #fff1d6;
-  --color-warning-border: #e2b25b;
-  --color-warning-text: #68480f;
-  --color-error-bg: #ffe9e6;
-  --color-error-border: #d35f4c;
-  --color-error-text: #7c2418;
-  --color-success-bg: #e7f0e8;
-  --color-success-border: #92bd9c;
-  --color-success-text: #244d2b;
-  --color-info-bg: #e9f2f4;
-  --color-info-border: #a9c8ce;
-  --color-focus: #d98f39;
-  --color-disabled: #9aa7ad;
+  --color-bg: #090909;
+  --color-panel: #141414;
+  --color-panel-alt: #1c1c1c;
+  --color-border: #262626;
+  --color-border-strong: #3a3a3a;
+  --color-text: #ffffff;
+  --color-muted: #999999;
+  --color-accent: #0099ff;
+  --color-accent-soft: rgba(0, 153, 255, 0.15);
+  --color-accent-soft-border: rgba(0, 153, 255, 0.55);
+  --color-warning-bg: rgba(255, 122, 61, 0.13);
+  --color-warning-border: rgba(255, 122, 61, 0.46);
+  --color-warning-text: #ffb083;
+  --color-error-bg: rgba(255, 85, 119, 0.14);
+  --color-error-border: rgba(255, 85, 119, 0.5);
+  --color-error-text: #ff99ad;
+  --color-success-bg: rgba(34, 197, 94, 0.14);
+  --color-success-border: rgba(34, 197, 94, 0.46);
+  --color-success-text: #86efac;
+  --color-info-bg: rgba(0, 153, 255, 0.12);
+  --color-info-border: rgba(0, 153, 255, 0.42);
+  --color-focus: #0099ff;
+  --color-disabled: #3a3a3a;
+  --color-gradient-magenta: #d44df0;
+  --color-gradient-violet: #6a4cf5;
+  --color-gradient-orange: #ff7a3d;
+  --color-gradient-coral: #ff5577;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --shadow-panel: 0 8px 24px rgba(29, 35, 39, 0.06);
+  --radius-sm: 10px;
+  --radius-md: 20px;
+  --radius-lg: 30px;
+  --radius-pill: 100px;
+  --shadow-panel: 0 18px 44px rgba(0, 0, 0, 0.28);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -44,6 +50,7 @@
   background: var(--color-bg);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv01", "cv05", "cv09", "cv11", "ss03", "ss07", "tnum";
   font-size: 15px;
 }
 
@@ -54,6 +61,7 @@
 body {
   margin: 0;
   min-width: 720px;
+  background: var(--color-bg);
 }
 
 button,
@@ -63,35 +71,54 @@ select {
 }
 
 button {
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-accent);
-  color: #ffffff;
+  border: 1px solid #ffffff;
+  border-radius: var(--radius-pill);
+  background: #ffffff;
+  color: #000000;
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 500;
   min-height: 42px;
   padding: 0 16px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
 }
 
 button.secondary {
-  background: var(--color-panel);
-  color: var(--color-accent);
+  background: var(--color-panel-alt);
+  border-color: var(--color-panel-alt);
+  color: var(--color-text);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: #242424;
+  border-color: #242424;
 }
 
 button:disabled {
   background: var(--color-disabled);
   border-color: var(--color-disabled);
+  color: var(--color-muted);
   cursor: not-allowed;
+  transform: none;
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 3px solid var(--color-focus);
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--color-accent-soft);
 }
 
 .app-shell {
+  background: var(--color-bg);
   min-height: 100vh;
   padding: 32px;
   padding-bottom: calc(var(--status-bar-height) + 32px);
@@ -129,12 +156,14 @@ p {
 
 h1 {
   font-size: 1.3rem;
+  font-weight: 500;
   line-height: 1.1;
   margin-bottom: 0;
 }
 
 h2 {
   font-size: 1.05rem;
+  font-weight: 500;
   margin-bottom: var(--space-4);
 }
 
@@ -191,7 +220,7 @@ h3 {
 }
 
 .artist-catalog-counts {
-  background: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-sm);
   padding: var(--space-2);
@@ -218,10 +247,16 @@ h3 {
 }
 
 .source-panel {
+  background:
+    radial-gradient(circle at 16% 6%, rgba(212, 77, 240, 0.78), transparent 28%),
+    radial-gradient(circle at 92% 20%, rgba(255, 122, 61, 0.58), transparent 30%),
+    linear-gradient(135deg, var(--color-gradient-violet), #18111f 62%, var(--color-panel));
+  border-color: rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-lg);
   display: grid;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
-  padding: var(--space-4);
+  padding: var(--space-5);
 }
 
 .source-panel h2 {
@@ -242,7 +277,7 @@ h3 {
 }
 
 .source-panel__dev-actions {
-  border-top: 1px dashed var(--color-border);
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
   margin-top: var(--space-1);
   padding-top: var(--space-3);
 }
@@ -272,10 +307,15 @@ input,
 select {
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
+  background: var(--color-panel);
   color: var(--color-text);
   min-height: 44px;
   padding: 0 12px;
   width: 100%;
+}
+
+input::placeholder {
+  color: var(--color-muted);
 }
 
 input[type="checkbox"] {
@@ -411,7 +451,7 @@ input[type="checkbox"] {
 .upload-list-row {
   background: var(--color-panel);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--color-text);
   cursor: pointer;
   display: grid;
@@ -422,12 +462,14 @@ input[type="checkbox"] {
 }
 
 .upload-list-row:hover {
-  border-color: var(--color-accent-soft-border);
+  background: var(--color-panel-alt);
+  border-color: var(--color-border-strong);
 }
 
 .upload-list-row.selected {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
+  background: var(--color-panel-alt);
+  border-color: var(--color-accent-soft-border);
+  box-shadow: 0 0 0 1px var(--color-accent-soft-border);
   color: var(--color-text);
 }
 
@@ -517,7 +559,7 @@ input[type="checkbox"] {
 .status-running {
   background: var(--color-info-bg);
   border-color: var(--color-info-border);
-  color: var(--color-accent);
+  color: var(--color-text);
 }
 
 .status-completed {
@@ -587,7 +629,7 @@ input[type="checkbox"] {
 }
 
 .inline-edit:focus-visible {
-  background: var(--color-panel);
+  background: var(--color-panel-alt);
 }
 
 .path-input {
@@ -664,9 +706,9 @@ input[type="checkbox"] {
 }
 
 .candidate-list li {
-  background: var(--color-panel);
+  background: var(--color-panel-alt);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   display: grid;
   gap: 2px;
   padding: 8px 10px;
@@ -762,7 +804,7 @@ input[type="checkbox"] {
 }
 
 .confidence-badge {
-  background: var(--color-bg);
+  background: var(--color-panel);
   border-color: var(--color-border);
   color: var(--color-muted);
 }
@@ -811,7 +853,7 @@ input[type="checkbox"] {
 
 .title-map li,
 .reason-list li {
-  background: var(--color-panel);
+  background: var(--color-panel-alt);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
@@ -903,7 +945,7 @@ input[type="checkbox"] {
 }
 
 .path-list li {
-  background: var(--color-bg);
+  background: var(--color-panel-alt);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -939,7 +981,7 @@ input[type="checkbox"] {
   background: var(--color-panel);
   border-top: 1px solid var(--color-border);
   bottom: 0;
-  box-shadow: 0 -4px 16px rgba(29, 35, 39, 0.06);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.36);
   display: flex;
   gap: var(--space-4);
   height: var(--status-bar-height);
@@ -955,7 +997,7 @@ input[type="checkbox"] {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   color: var(--color-text);
   display: flex;
   flex: 0 1 auto;
@@ -968,8 +1010,8 @@ input[type="checkbox"] {
 }
 
 .status-bar__root-button:hover {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent-soft-border);
+  background: var(--color-panel-alt);
+  border-color: var(--color-border-strong);
 }
 
 .status-bar__root-icon {
