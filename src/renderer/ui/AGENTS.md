@@ -17,7 +17,10 @@ This subtree contains React UI components and UI helper modules for search, deta
 * License, warning, and attribution text must not imply permissions when license data is unknown.
 * Loading, empty, and error states must remain visible for user-facing flows.
 * The main scan/review/download flow is musician-facing. Do not show developer terms such as group, resolver, candidate, confidence, source mode, merge, or session in the main UI.
-* Root/download folder paths are shown in the bottom status bar only.
+* Root/download folder paths are shown in the bottom status bar only. The bottom status bar also owns the primary download call-to-action (`Download (x)`).
+* Review and Download are separate user states: Review is for choosing/renaming files (`UploadListDetail`); Download (`DownloadScreen`) shows progress and result only, with no editing and no archive inspection.
+* Follow the design contract in `docs/DESIGN.md`: preserve the accepted color palette and panel chrome; only typography/density may be tuned without explicit user sign-off.
+* ZIP content disclosure (`ArchiveDisclosure` in `UploadListDetail.tsx`) must render all entries when opened, borderless, with no truncation.
 
 ## Work Guidance
 

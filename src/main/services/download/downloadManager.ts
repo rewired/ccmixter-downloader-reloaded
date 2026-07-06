@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { constants as fsConstants, promises as fs } from 'fs';
 import path from 'path';
 
 import {
@@ -80,6 +80,19 @@ export class DownloadManager {
         status: 'failed',
         warnings: validation.warnings,
         errors: validation.blockingErrors
+      });
+      const state = toQueueState(failedJob);
+      this.emitProgress(state);
+      this.emitCompleted(failedJob);
+      return state;
+    }
+
+    const rootError = await this.checkRootAvailable(trustedJob.stemLibraryRootPath);
+    if (rootError) {
+      const failedJob = this.updateJob({
+        ...trustedJob,
+        status: 'failed',
+        errors: [...trustedJob.errors, rootError]
       });
       const state = toQueueState(failedJob);
       this.emitProgress(state);
@@ -337,6 +350,20 @@ export class DownloadManager {
         targetAbsolutePath: this.resolveTargetPath(job.stemLibraryRootPath, file.targetRelativePath)
       }))
     };
+  }
+
+  private async checkRootAvailable(rootPath: string): Promise<DownloadError | undefined> {
+    try {
+      await fs.mkdir(rootPath, { recursive: true });
+      await fs.access(rootPath, fsConstants.W_OK);
+      return undefined;
+    } catch {
+      return downloadError(
+        'DOWNLOAD_ROOT_UNAVAILABLE',
+        'Download folder is not reachable or writable. Choose another folder.',
+        true
+      );
+    }
   }
 
   private async findExistingTargets(job: DownloadJob): Promise<string[]> {

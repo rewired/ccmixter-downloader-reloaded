@@ -202,7 +202,7 @@ function ReviewGroupDetail({
 
           return (
             <li className={file.included ? undefined : 'excluded-file'} key={file.fileId} data-filename={file.originalFilename}>
-              <div className="file-row">
+              <div className="file-row file-row--main">
                 <input
                   checked={file.included}
                   onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
@@ -218,8 +218,8 @@ function ReviewGroupDetail({
                   size={Math.max(baseName.length, 1)}
                 />
                 {extension ? <span className="file-rename-ext">.{extension}</span> : null}
-                <ArchiveDisclosure file={file.originalFile} />
               </div>
+              <ArchiveDisclosure file={file.originalFile} />
               {file.targetFilename !== file.originalFilename ? (
                 <small>{t('review.originalFileName')}: {file.originalFilename}</small>
               ) : null}
@@ -268,32 +268,16 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
       <ul className="candidate-list file-list">
         {group.files.map((file) => (
           <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`} data-filename={file.originalFilename}>
-            <div className="file-row">
+            <div className="file-row file-row--main">
               <span>{file.displayLabel ?? file.originalFilename}</span>
               {file.extension ? <span className="file-rename-ext">.{file.extension}</span> : null}
-              <ArchiveDisclosure file={file} />
             </div>
+            <ArchiveDisclosure file={file} />
           </li>
         ))}
       </ul>
     </section>
   );
-}
-
-// Real ccMixter archives can carry dozens of ZIP-internal entries; rendering all of them inline
-// would turn a single file row into a wall of text, so the disclosure is capped and the rest is
-// summarized instead of listed.
-export const MAX_INLINE_ARCHIVE_HINTS = 5;
-
-export function capArchiveHints(
-  entries: string[],
-  max = MAX_INLINE_ARCHIVE_HINTS
-): { visible: string[]; hiddenCount: number } {
-  if (entries.length <= max) {
-    return { visible: entries, hiddenCount: 0 };
-  }
-
-  return { visible: entries.slice(0, max), hiddenCount: entries.length - max };
 }
 
 function ArchiveDisclosure({ file }: { file: TrackFile }): JSX.Element | null {
@@ -303,16 +287,13 @@ function ArchiveDisclosure({ file }: { file: TrackFile }): JSX.Element | null {
     return null;
   }
 
-  const { visible, hiddenCount } = capArchiveHints(entries);
-
   return (
     <details className="archive-disclosure">
       <summary>ZIP · {entries.length} file{entries.length === 1 ? '' : 's'} inside</summary>
       <ul className="archive-disclosure__list">
-        {visible.map((entry) => (
+        {entries.map((entry) => (
           <li key={entry}>{entry}</li>
         ))}
-        {hiddenCount > 0 ? <li className="archive-disclosure__more">+{hiddenCount} more</li> : null}
       </ul>
     </details>
   );

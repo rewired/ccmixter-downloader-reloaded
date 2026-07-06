@@ -41,33 +41,34 @@ test('fixture:haze-smoke review and download smoke', async () => {
     await expect(page.getByText('Merge into')).not.toBeVisible();
 
     await page.getByLabel('Song folder').fill('Haze smoke review');
-    await expectWritableFiles(page, 0);
+    await expectSelectedFiles(page, 0);
+    await expect(page.getByRole('button', { name: 'Download (0)' })).toBeDisabled();
 
-    // Zutsuri_-_Haze.zip carries recorded ccMixter ZIP contents; selecting it should reveal them.
+    // Zutsuri_-_Haze.zip carries recorded ccMixter ZIP contents; selecting it should reveal all of them, uncapped.
     await fileRow(page, 'Zutsuri_-_Haze.zip').getByRole('checkbox').check();
-    await expectWritableFiles(page, 1);
+    await expectSelectedFiles(page, 1);
     await expect(page.getByText('2 files inside')).toBeVisible();
     await page.getByText('2 files inside').click();
     await expect(page.getByText('haze - Vox 3.02_01-01.flac')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Preview archive contents' })).toBeVisible();
+    await expect(page.getByText('haze - Vox Dbl_01-05.flac')).toBeVisible();
+    await expect(page.locator('.archive-disclosure__more')).toHaveCount(0);
 
     await fileRow(page, 'Zutsuri_-_Haze_1.mp3').getByRole('checkbox').check();
-    await expectWritableFiles(page, 2);
+    await expectSelectedFiles(page, 2);
 
     await fileRow(page, 'fixture-missing-url.wav').getByRole('checkbox').check();
-    await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
-    await expectWritableFiles(page, 2);
+    await expectSelectedFiles(page, 3);
 
     await fileRow(page, 'Zutsuri_-_Haze.zip').getByRole('checkbox').uncheck();
-    await expectWritableFiles(page, 1);
+    await expectSelectedFiles(page, 2);
 
-    await page.getByRole('button', { name: 'Prepare download' }).click();
     await expect(fileExists(expectedTarget)).resolves.toBe(false);
+    await page.getByRole('button', { name: 'Download (2)' }).click();
 
-    await page.getByRole('button', { name: 'Start download' }).click();
-    await expect(page.getByText('Result: completed (1 completed, 0 failed)')).toBeVisible({
-      timeout: 60_000
-    });
+    await expect(page.getByRole('heading', { name: 'Download' })).toBeVisible();
+    await expect(downloadFileRow(page, 'fixture-missing-url.wav')).toContainText('skipped');
+    await expect(page.getByText('Completed', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText('1 completed, 0 failed')).toBeVisible();
     await expect(fileExists(expectedTarget)).resolves.toBe(true);
 
     const writtenFiles = await collectFiles(root);
@@ -80,8 +81,8 @@ test('fixture:haze-smoke review and download smoke', async () => {
   }
 });
 
-async function expectWritableFiles(page: Page, count: number): Promise<void> {
-  await expect(page.getByText(new RegExp(`^${count} files selected -`))).toBeVisible();
+async function expectSelectedFiles(page: Page, count: number): Promise<void> {
+  await expect(page.getByText(`${count} file${count === 1 ? '' : 's'} selected`, { exact: true })).toBeVisible();
 }
 
 function fileRow(page: Page, filename: string) {

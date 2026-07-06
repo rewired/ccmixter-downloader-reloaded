@@ -56,7 +56,7 @@ describe('renderer safety', () => {
     const source = await readRendererSourceFiles([
       'src/renderer/ui/SourcePanel.tsx',
       'src/renderer/ui/UploadListDetail.tsx',
-      'src/renderer/ui/DownloadPanel.tsx',
+      'src/renderer/ui/DownloadScreen.tsx',
       'src/renderer/ui/StatusBar.tsx'
     ]);
 
@@ -67,15 +67,12 @@ describe('renderer safety', () => {
     expect(source).not.toContain('source mode');
   });
 
-  it('renders archive preview controls and warning states from shared renderer state', async () => {
-    const source = await readAllRendererSource();
+  it('keeps the download screen focused on progress and result, not archive inspection', async () => {
+    const source = await readRendererSourceFiles(['src/renderer/ui/DownloadScreen.tsx']);
 
-    expect(source).toContain('Preview archive contents');
-    expect(source).toContain('Archive preview is informational; extraction is not implemented yet.');
-    expect(source).toContain('ArchivePreviewDetails');
-    expect(source).toContain('Safe to extract');
-    expect(source).toContain('blocking');
-    expect(source).toContain('previewArchiveDownload');
+    expect(source).not.toContain('Preview archive contents');
+    expect(source).not.toContain('ArchivePreviewDetails');
+    expect(source).not.toContain('previewArchiveDownload');
   });
 
   it('exposes one primary "Scan source" workflow action instead of separate parse/resolve/dry-run primaries', async () => {

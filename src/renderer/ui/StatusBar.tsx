@@ -2,8 +2,6 @@ import type { ArtistCatalogScanPhase, StemLibraryRoot } from '../../shared/domai
 import { t } from '../i18n';
 import { resolveStatusBarRootLabel, type ArtistCatalogCounts } from './catalogStatus';
 
-type Status = 'idle' | 'loading' | 'error';
-
 export function StatusBar({
   stemLibraryRoot,
   onChooseRoot,
@@ -12,7 +10,10 @@ export function StatusBar({
   scanPhase,
   plannedFileCount,
   hasReviewSession,
-  downloadStatus
+  downloadFileCount,
+  canDownload,
+  isDownloading,
+  onDownload
 }: {
   stemLibraryRoot: StemLibraryRoot | null;
   onChooseRoot: () => void;
@@ -21,8 +22,10 @@ export function StatusBar({
   scanPhase: ArtistCatalogScanPhase;
   plannedFileCount: number;
   hasReviewSession: boolean;
-  downloadStatus: 'dry-run' | 'ready' | 'downloading';
-  status: Status;
+  downloadFileCount: number;
+  canDownload: boolean;
+  isDownloading: boolean;
+  onDownload: () => void;
 }): JSX.Element {
   const rootLabel = resolveStatusBarRootLabel(stemLibraryRoot);
   const progressText = isArtistCatalog && catalogCounts ? resolveProgressText(scanPhase, catalogCounts) : null;
@@ -31,12 +34,6 @@ export function StatusBar({
       ? `Found ${catalogCounts.downloadableGroupCount} song${catalogCounts.downloadableGroupCount === 1 ? '' : 's'} - ${catalogCounts.downloadableFileCount} file${catalogCounts.downloadableFileCount === 1 ? '' : 's'}`
       : null;
   const selectedText = hasReviewSession ? `${plannedFileCount} file${plannedFileCount === 1 ? '' : 's'} selected` : null;
-  const stateText =
-    downloadStatus === 'downloading'
-      ? t('status.downloading')
-      : downloadStatus === 'dry-run'
-        ? t('status.dryRun')
-        : t('status.ready');
 
   return (
     <footer className="status-bar" role="contentinfo">
@@ -57,8 +54,18 @@ export function StatusBar({
         {progressText ? <span>{progressText}</span> : null}
         {foundText ? <span>{foundText}</span> : null}
         {selectedText ? <span>{selectedText}</span> : null}
-        <span className="status-bar__note">{stateText}</span>
       </div>
+
+      {hasReviewSession ? (
+        <button
+          type="button"
+          className="status-bar__download-cta"
+          onClick={onDownload}
+          disabled={!canDownload || isDownloading}
+        >
+          {isDownloading ? t('download.ctaRunning') : `${t('download.cta')} (${downloadFileCount})`}
+        </button>
+      ) : null}
     </footer>
   );
 }

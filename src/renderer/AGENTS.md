@@ -16,6 +16,7 @@ This subtree contains React Renderer code, browser UI state, styles, and present
 * Do not import Electron or Node-specific APIs into Renderer code.
 * Use preload-exposed APIs and shared types for privileged operations.
 * Visible user states for loading, empty, and error cases must stay clear.
+* Renderer/UI design decisions follow `docs/DESIGN.md`: the current color palette and panel chrome are accepted and must be preserved; only typography and density may be tuned without explicit user sign-off.
 
 ## Work Guidance
 

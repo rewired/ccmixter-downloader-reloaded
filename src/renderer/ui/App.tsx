@@ -2,14 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildReviewedDryRunPlan,
-  createDownloadJobFromReviewedPlan,
   createDryRunPlanFromGroups,
   createReviewSessionFromDryRunPlan,
   isArtistCatalogInput,
-  summarizeDownloadJob,
-  validateDownloadJob,
   type AppError,
-  type ArchivePreview,
   type ArtistCatalogPageResult,
   type ArtistCatalogScanPhase,
   type ArtistCatalogState,
@@ -27,7 +23,7 @@ import type { AppInfo } from '../../shared/ipc';
 import { t } from '../i18n';
 
 import { resolveArtistCatalogCounts } from './catalogStatus';
-import { DownloadPanel } from './DownloadPanel';
+import { DownloadScreen } from './DownloadScreen';
 import { SourcePanel } from './SourcePanel';
 import { StatusBar } from './StatusBar';
 import { TechnicalDetails } from './TechnicalDetails';
@@ -36,6 +32,7 @@ import { UploadListDetail, type ListMode } from './UploadListDetail';
 export { resolveArtistCatalogStatus } from './catalogStatus';
 
 type Status = 'idle' | 'loading' | 'error';
+type AppScreen = 'review' | 'download';
 
 const PLACEHOLDER_ROOT: StemLibraryRoot = {
   path: '',
@@ -53,8 +50,7 @@ export function App(): JSX.Element {
   const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
   const [downloadQueueState, setDownloadQueueState] = useState<DownloadQueueState | null>(null);
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
-  const [archivePreviews, setArchivePreviews] = useState<Record<string, ArchivePreview>>({});
-  const [archivePreviewErrors, setArchivePreviewErrors] = useState<Record<string, string>>({});
+  const [screen, setScreen] = useState<AppScreen>('review');
   const [catalogSessionState, setCatalogSessionState] = useState<ArtistCatalogState | null>(null);
   const [catalogIsLoadingMore, setCatalogIsLoadingMore] = useState(false);
   const [artistScanRunning, setArtistScanRunning] = useState(false);
@@ -358,9 +354,23 @@ export function App(): JSX.Element {
     }
   }
 
-  async function prepareDownloadJob(reviewedPlan: DryRunPlan): Promise<void> {
+  async function onDownloadClick(): Promise<void> {
+    if (!reviewedDryRunPlan) {
+      setError({ code: 'DOWNLOAD_NO_FILES', message: t('download.errorNoFiles'), recoverable: true });
+      return;
+    }
+
+    await startDownload(reviewedDryRunPlan);
+  }
+
+  async function startDownload(reviewedPlan: DryRunPlan): Promise<void> {
+    if (reviewedPlan.plannedFiles.length === 0) {
+      setError({ code: 'DOWNLOAD_NO_FILES', message: t('download.errorNoFiles'), recoverable: true });
+      return;
+    }
+
     if (!stemLibraryRoot) {
-      await chooseStemLibraryRoot();
+      setError({ code: 'DOWNLOAD_ROOT_REQUIRED', message: t('download.errorRootRequired'), recoverable: true });
       return;
     }
 
@@ -373,37 +383,32 @@ export function App(): JSX.Element {
 
       if (!jobResult.ok) {
         setError(jobResult.error);
-        setStatus('error');
+        setStatus('idle');
+        return;
+      }
+
+      const startResult = await window.ccmixterDownloader.startDownloadJob(jobResult.value.jobId);
+
+      if (!startResult.ok) {
+        setError(startResult.error);
+        setStatus('idle');
+        return;
+      }
+
+      const attemptedAnyFile = startResult.value.files.some(
+        (file) => file.status === 'running' || file.status === 'completed' || file.status === 'failed'
+      );
+
+      if (startResult.value.status === 'failed' && !attemptedAnyFile && startResult.value.errors.length > 0) {
+        setError(startResult.value.errors[0]!);
+        setStatus('idle');
         return;
       }
 
       setDownloadJob(jobResult.value);
-      setDownloadQueueState(null);
-      setStatus('idle');
-    } catch (downloadError) {
-      setError(toAppError(downloadError));
-      setStatus('error');
-    }
-  }
-
-  async function confirmDownloadJob(jobId: string): Promise<void> {
-    setStatus('loading');
-    setError(null);
-    if (downloadJob && downloadJob.jobId === jobId) {
-      setDownloadQueueState(toInitialDownloadQueueState(downloadJob));
-    }
-
-    try {
-      const startResult = await window.ccmixterDownloader.startDownloadJob(jobId);
-
-      if (!startResult.ok) {
-        setError(startResult.error);
-        setStatus('error');
-        return;
-      }
-
       setDownloadQueueState(startResult.value);
       setStatus('idle');
+      setScreen('download');
     } catch (downloadError) {
       setError(toAppError(downloadError));
       setStatus('error');
@@ -430,34 +435,15 @@ export function App(): JSX.Element {
     }
   }
 
-  async function previewArchiveDownload(jobId: string, fileJobId: string): Promise<void> {
-    setError(null);
-    setArchivePreviewErrors((current) => {
-      const next = { ...current };
-      delete next[fileJobId];
-      return next;
-    });
-
-    try {
-      const result = await window.ccmixterDownloader.previewArchiveDownload(jobId, fileJobId);
-
-      if (!result.ok) {
-        setArchivePreviewErrors((current) => ({ ...current, [fileJobId]: result.error.message }));
-        return;
-      }
-
-      setArchivePreviews((current) => ({ ...current, [fileJobId]: result.value }));
-    } catch (previewError) {
-      setArchivePreviewErrors((current) => ({ ...current, [fileJobId]: toAppError(previewError).message }));
-    }
+  function backToReview(): void {
+    resetDownloadState();
   }
 
   function resetDownloadState(): void {
     setDownloadJob(null);
     setDownloadQueueState(null);
     setDownloadResult(null);
-    setArchivePreviews({});
-    setArchivePreviewErrors({});
+    setScreen('review');
   }
 
   const canScanSource = rawInput.trim().length > 0 && status !== 'loading';
@@ -468,18 +454,11 @@ export function App(): JSX.Element {
     () => (dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, stemLibraryRoot ?? dryRunPlan.stemLibraryRoot) : dryRunPlan),
     [dryRunPlan, reviewSession, stemLibraryRoot]
   );
-  const advisoryDownloadJob = useMemo(
-    () => (reviewedDryRunPlan ? createDownloadJobFromReviewedPlan(reviewedDryRunPlan, { jobId: 'renderer-advisory-job' }) : null),
-    [reviewedDryRunPlan]
-  );
-  const advisoryDownloadValidation = advisoryDownloadJob ? validateDownloadJob(advisoryDownloadJob) : null;
-  const advisoryDownloadSummary = advisoryDownloadJob ? summarizeDownloadJob(advisoryDownloadJob) : null;
   const catalogCounts = isArtistCatalog ? resolveArtistCatalogCounts(catalogSessionState, resolvedMetadata, dryRunPlan, reviewedDryRunPlan) : null;
-  const canPrepareDownload =
-    Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
-    status !== 'loading';
   const songCount = reviewSession?.groups.filter((group) => group.files.some((file) => file.included)).length ?? 0;
-  const downloadStatus = downloadQueueState?.status === 'running' ? 'downloading' : reviewedDryRunPlan ? 'dry-run' : 'ready';
+  const downloadFileCount = reviewedDryRunPlan?.plannedFiles.length ?? 0;
+  const isDownloading = downloadQueueState?.status === 'running';
+  const canDownload = downloadFileCount > 0 && status !== 'loading';
 
   const listMode = useMemo<ListMode | null>(() => {
     if (reviewSession) {
@@ -524,18 +503,6 @@ export function App(): JSX.Element {
           <span className="version">v{appInfo?.version ?? '0.1.0'}</span>
         </header>
 
-        <SourcePanel
-          rawInput={rawInput}
-          onRawInputChange={setRawInput}
-          onScanSource={() => void scanSource()}
-          onCancelScan={() => void cancelArtistScan()}
-          canScan={canScanSource}
-          canCancelScan={artistScanRunning && Boolean(catalogSessionState)}
-          status={status}
-        />
-
-        <ScanProgress phase={scanPhase} counts={catalogCounts} running={artistScanRunning || catalogIsLoadingMore} />
-
         {error ? (
           <section className="error" role="alert">
             <strong>{error.message}</strong>
@@ -543,55 +510,58 @@ export function App(): JSX.Element {
           </section>
         ) : null}
 
-        <TechnicalDetails
-          parsedInput={parsedInput}
-          dryRunPlan={dryRunPlan}
-          resolvedMetadata={resolvedMetadata}
-          reviewSession={reviewSession}
-          catalogCounts={catalogCounts}
-          catalogIsLoadingMore={catalogIsLoadingMore}
-          hasMore={catalogSessionState?.hasMore ?? false}
-          pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
-          onParseInput={() => void parseInput()}
-          onResolveMetadata={() => void resolveMetadata()}
-          status={status}
-        />
-
-        <section className="results" aria-label="Song and file review">
-          {listMode ? (
-            <UploadListDetail
-              mode={listMode}
-              selectedGroupId={selectedGroupId}
-              onSelectGroup={setSelectedGroupId}
-              noFilesFoundUploads={catalogSessionState?.noFilesFoundUploads ?? []}
-              couldNotCheckFilesUploads={catalogSessionState?.couldNotCheckFilesUploads ?? []}
-            />
-          ) : (
-            <p className="empty">{t('review.empty')}</p>
-          )}
-
-          {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
-            <DownloadPanel
-              advisoryJob={advisoryDownloadJob}
-              advisorySummary={advisoryDownloadSummary}
-              advisoryValidationOk={advisoryDownloadValidation.ok}
-              canPrepareDownload={canPrepareDownload}
-              hasDownloadFolder={Boolean(stemLibraryRoot)}
-              songCount={songCount}
-              downloadJob={downloadJob}
-              downloadQueueState={downloadQueueState}
-              downloadResult={downloadResult}
-              archivePreviews={archivePreviews}
-              archivePreviewErrors={archivePreviewErrors}
-              onCancel={(jobId) => void cancelDownloadJob(jobId)}
-              onChooseDownloadFolder={() => void chooseStemLibraryRoot()}
-              onConfirm={(jobId) => void confirmDownloadJob(jobId)}
-              onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
-              onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
+        {screen === 'download' && downloadJob ? (
+          <DownloadScreen
+            job={downloadJob}
+            queueState={downloadQueueState}
+            result={downloadResult}
+            songCount={songCount}
+            onCancel={(jobId) => void cancelDownloadJob(jobId)}
+            onBackToReview={backToReview}
+          />
+        ) : (
+          <>
+            <SourcePanel
+              rawInput={rawInput}
+              onRawInputChange={setRawInput}
+              onScanSource={() => void scanSource()}
+              onCancelScan={() => void cancelArtistScan()}
+              canScan={canScanSource}
+              canCancelScan={artistScanRunning && Boolean(catalogSessionState)}
               status={status}
             />
-          ) : null}
-        </section>
+
+            <ScanProgress phase={scanPhase} counts={catalogCounts} running={artistScanRunning || catalogIsLoadingMore} />
+
+            <TechnicalDetails
+              parsedInput={parsedInput}
+              dryRunPlan={dryRunPlan}
+              resolvedMetadata={resolvedMetadata}
+              reviewSession={reviewSession}
+              catalogCounts={catalogCounts}
+              catalogIsLoadingMore={catalogIsLoadingMore}
+              hasMore={catalogSessionState?.hasMore ?? false}
+              pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
+              onParseInput={() => void parseInput()}
+              onResolveMetadata={() => void resolveMetadata()}
+              status={status}
+            />
+
+            <section className="results" aria-label="Song and file review">
+              {listMode ? (
+                <UploadListDetail
+                  mode={listMode}
+                  selectedGroupId={selectedGroupId}
+                  onSelectGroup={setSelectedGroupId}
+                  noFilesFoundUploads={catalogSessionState?.noFilesFoundUploads ?? []}
+                  couldNotCheckFilesUploads={catalogSessionState?.couldNotCheckFilesUploads ?? []}
+                />
+              ) : (
+                <p className="empty">{t('review.empty')}</p>
+              )}
+            </section>
+          </>
+        )}
       </div>
 
       <StatusBar
@@ -602,8 +572,10 @@ export function App(): JSX.Element {
         scanPhase={scanPhase}
         plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
         hasReviewSession={Boolean(reviewSession)}
-        downloadStatus={downloadStatus}
-        status={status}
+        downloadFileCount={downloadFileCount}
+        canDownload={canDownload}
+        isDownloading={Boolean(isDownloading)}
+        onDownload={() => void onDownloadClick()}
       />
     </main>
   );
@@ -710,39 +682,6 @@ function toAppError(error: unknown): AppError {
     code: 'RENDERER_ERROR',
     message: error instanceof Error ? error.message : 'An unexpected renderer error occurred.',
     recoverable: true
-  };
-}
-
-function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {
-  const activeFiles = job.files.filter((file) => file.status !== 'skipped');
-  const blockedFiles = job.files.filter((file) => file.status === 'blocked');
-  const writableFiles = job.files.filter((file) => file.status !== 'skipped' && file.status !== 'blocked');
-
-  return {
-    jobId: job.jobId,
-    status: 'running',
-    files: job.files.map((file) => ({
-      fileJobId: file.fileJobId,
-      targetRelativePath: file.targetRelativePath,
-      status: file.status,
-      receivedBytes: file.receivedBytes,
-      totalBytes: file.totalBytes,
-      warnings: file.warnings,
-      errors: file.errors
-    })),
-    progress: {
-      jobId: job.jobId,
-      status: 'running',
-      completedFiles: 0,
-      totalFiles: writableFiles.length,
-      skippedFiles: job.files.length - activeFiles.length,
-      blockedFiles: blockedFiles.length,
-      failedFiles: 0,
-      warnings: job.warnings,
-      errors: job.errors
-    },
-    warnings: job.warnings,
-    errors: job.errors
   };
 }
 

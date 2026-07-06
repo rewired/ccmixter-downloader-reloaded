@@ -114,6 +114,27 @@ describe('DownloadManager', () => {
     expect(await readFile(target, 'utf8')).toBe('existing');
   });
 
+  it('fails clearly and writes nothing when the download root is not reachable or writable', async () => {
+    const parent = await tempRoot();
+    const blockingFile = path.join(parent, 'blocking-file');
+    await writeFile(blockingFile, 'not a directory');
+    const root = path.join(blockingFile, 'stem-library');
+    let fetchCount = 0;
+    const manager = new DownloadManager({
+      fetcher: async () => {
+        fetchCount += 1;
+        return responseFrom(['bass-data']);
+      }
+    });
+    const job = await manager.createJobFromReviewedPlan(createPlan(root));
+
+    const state = await manager.startDownloadJob(job.jobId);
+
+    expect(state.status).toBe('failed');
+    expect(state.errors.map((error) => error.code)).toContain('DOWNLOAD_ROOT_UNAVAILABLE');
+    expect(fetchCount).toBe(0);
+  });
+
   it('uses unique temp files per job and file while active', async () => {
     const root = await tempRoot();
     let resolveFirstRead: (() => void) | undefined;

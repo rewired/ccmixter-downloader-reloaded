@@ -28,4 +28,5 @@ This subtree contains durable project documentation, research notes, architectur
 ## Child DOX Index
 
 * `adr/AGENTS.md` covers architecture decision records.
+* `DESIGN.md` is the binding Renderer/UI design contract (accepted colors/chrome, tunable typography/density). `src/renderer/AGENTS.md` and `src/renderer/ui/AGENTS.md` reference it.
 * `ccmixter-downloader-research-report.md` remains owned by this file.
