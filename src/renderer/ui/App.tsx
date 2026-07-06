@@ -3,25 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ARTIST_SCAN_REALITY_CHECK_WARNING,
   buildReviewedDryRunPlan,
-  clearIncludedDownloadCandidates,
   createDownloadJobFromReviewedPlan,
   createDryRunPlanFromGroups,
   createReviewSessionFromDryRunPlan,
-  excludeArchiveDownloadCandidates,
-  excludePreviewDownloadCandidates,
-  getDownloadCandidateClassification,
-  includeRecommendedDownloadCandidates,
   isArtistCatalogInput,
-  markGroupAccepted,
-  markGroupNeedsReview,
-  mergeGroups,
-  renameArtist,
-  renameFile,
-  renameGroup,
-  resetGroupOverrides,
-  splitGroup,
   summarizeDownloadJob,
-  toggleFileIncluded,
   validateDownloadJob,
   type AppError,
   type ArchivePreview,
@@ -32,13 +18,19 @@ import {
   type DownloadResult,
   type DryRunPlan,
   type ResolvedCcmixterMetadata,
-  type ReviewGroup,
-  type ReviewFile,
   type ReviewSession,
-  type StemGroup,
   type StemLibraryRoot
 } from '../../shared/domain';
 import type { AppInfo } from '../../shared/ipc';
+
+import { resolveArtistCatalogCounts, selectWarningTiers } from './catalogStatus';
+import { DownloadPanel } from './DownloadPanel';
+import { SourcePanel } from './SourcePanel';
+import { StatusBar } from './StatusBar';
+import { TechnicalDetails } from './TechnicalDetails';
+import { UploadListDetail, type ListMode } from './UploadListDetail';
+
+export { resolveArtistCatalogStatus } from './catalogStatus';
 
 type Status = 'idle' | 'loading' | 'error';
 
@@ -46,7 +38,7 @@ const DOWNLOAD_WARNING = 'Downloads start only after review and explicit confirm
 
 export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
-  const [rawInput, setRawInput] = useState('https://ccmixter.org/files/sample_artist/000000');
+  const [rawInput, setRawInput] = useState('');
   const [stemLibraryRoot, setStemLibraryRoot] = useState<StemLibraryRoot | null>(null);
   const [parsedInput, setParsedInput] = useState<CcmixterInput | null>(null);
   const [resolvedMetadata, setResolvedMetadata] = useState<ResolvedCcmixterMetadata | null>(null);
@@ -59,6 +51,7 @@ export function App(): JSX.Element {
   const [archivePreviewErrors, setArchivePreviewErrors] = useState<Record<string, string>>({});
   const [catalogSessionState, setCatalogSessionState] = useState<ArtistCatalogState | null>(null);
   const [catalogIsLoadingMore, setCatalogIsLoadingMore] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<AppError | null>(null);
 
@@ -275,13 +268,15 @@ export function App(): JSX.Element {
     }
   }
 
-  async function startArtistCatalog(): Promise<void> {
+  async function startArtistCatalog(explicitInput?: CcmixterInput): Promise<void> {
     setStatus('loading');
     setError(null);
     setCatalogSessionState(null);
 
     try {
-      if (!parsedInput?.artistLogin) {
+      const input = explicitInput ?? parsedInput;
+
+      if (!input?.artistLogin) {
         setError({ code: 'NO_ARTIST_LOGIN', message: 'Artist login could not be determined.', recoverable: true });
         setStatus('error');
         return;
@@ -293,10 +288,7 @@ export function App(): JSX.Element {
         return;
       }
 
-      const result = await window.ccmixterDownloader.artistCatalogStart(
-        parsedInput.artistLogin,
-        parsedInput.sourceUrl
-      );
+      const result = await window.ccmixterDownloader.artistCatalogStart(input.artistLogin, input.sourceUrl);
 
       if (!result.ok) {
         setError(result.error);
@@ -347,6 +339,28 @@ export function App(): JSX.Element {
       setStatus('idle');
     } catch (planError) {
       setError(toAppError(planError));
+      setStatus('error');
+    }
+  }
+
+  async function scanSource(): Promise<void> {
+    setStatus('loading');
+    setError(null);
+
+    try {
+      const parsed = await window.ccmixterDownloader.parseInput(rawInput);
+      setParsedInput(parsed);
+      setResolvedMetadata(null);
+      setReviewSession(null);
+      resetDownloadState();
+
+      if (isArtistCatalogInput(parsed)) {
+        await startArtistCatalog(parsed);
+      } else {
+        await createDryRunPlan();
+      }
+    } catch (scanError) {
+      setError(toAppError(scanError));
       setStatus('error');
     }
   }
@@ -448,7 +462,7 @@ export function App(): JSX.Element {
     setArchivePreviewErrors({});
   }
 
-  const canCreateDryRun = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
+  const canScanSource = stemLibraryRoot !== null && rawInput.trim().length > 0 && status !== 'loading';
   const reviewedDryRunPlan = useMemo(
     () => (dryRunPlan && reviewSession ? buildReviewedDryRunPlan(reviewSession, dryRunPlan.stemLibraryRoot) : dryRunPlan),
     [dryRunPlan, reviewSession]
@@ -466,9 +480,49 @@ export function App(): JSX.Element {
     Boolean(stemLibraryRoot && reviewedDryRunPlan && advisoryDownloadValidation?.ok && advisoryDownloadSummary && advisoryDownloadSummary.writableFiles > 0) &&
     status !== 'loading';
 
+  const listMode = useMemo<ListMode | null>(() => {
+    if (reviewSession) {
+      return { kind: 'review', reviewSession, onChange: setReviewSession };
+    }
+    if (dryRunPlan) {
+      return { kind: 'raw', groups: dryRunPlan.groups };
+    }
+    if (resolvedMetadata) {
+      return { kind: 'raw', groups: resolvedMetadata.groups };
+    }
+    return null;
+  }, [reviewSession, dryRunPlan, resolvedMetadata]);
+
+  useEffect(() => {
+    const activeIds = listMode
+      ? listMode.kind === 'review'
+        ? listMode.reviewSession.groups.map((group) => group.reviewGroupId)
+        : listMode.groups.map((group) => group.groupId)
+      : [];
+
+    if (activeIds.length === 0) {
+      if (selectedGroupId !== null) {
+        setSelectedGroupId(null);
+      }
+      return;
+    }
+
+    if (selectedGroupId === null || !activeIds.includes(selectedGroupId)) {
+      setSelectedGroupId(activeIds[0]!);
+    }
+  }, [listMode, selectedGroupId]);
+
+  const selectedGroupForTiers = listMode
+    ? listMode.kind === 'review'
+      ? listMode.reviewSession.groups.find((group) => group.reviewGroupId === selectedGroupId) ?? null
+      : listMode.groups.find((group) => group.groupId === selectedGroupId) ?? null
+    : null;
+  const globalWarnings = reviewedDryRunPlan?.warnings ?? resolvedMetadata?.warnings ?? [];
+  const warningTiers = selectWarningTiers(globalWarnings, selectedGroupForTiers);
+
   return (
     <main className="app-shell">
-      <section className="workspace">
+      <div className="workspace">
         <header className="app-header">
           <div>
             <p className="eyebrow">Stem library planner</p>
@@ -477,55 +531,20 @@ export function App(): JSX.Element {
           <span className="version">v{appInfo?.version ?? '0.1.0'}</span>
         </header>
 
-        <section className="banner" role="status">
+        <section className="status-strip" role="status">
           <strong>{DOWNLOAD_WARNING}</strong>
           <span>No ZIP extraction or attribution writing happens in this slice.</span>
         </section>
 
-        {isArtistCatalog ? (
-          <section className="banner artist-scan-banner" role="status">
-            <strong>Review artist uploads</strong>
-            <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
-            {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
-          </section>
-        ) : null}
-
-        <section className="controls" aria-label="Dry run controls">
-          <label className="field">
-            <span>ccMixter artist, upload link, or upload ID</span>
-            <input
-              value={rawInput}
-              onChange={(event) => setRawInput(event.target.value)}
-              placeholder="https://ccmixter.org/files/artist/12345"
-            />
-          </label>
-
-          <div className="root-folder">
-            <div>
-              <span className="field-label">Stem Library Root Folder</span>
-              <strong>{stemLibraryRoot?.path ?? 'No root folder selected'}</strong>
-            </div>
-            <button type="button" onClick={() => void chooseStemLibraryRoot()} disabled={status === 'loading'}>
-              Choose Stem Library Root Folder
-            </button>
-          </div>
-
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => void parseInput()} disabled={status === 'loading'}>
-              Parse input
-            </button>
-            <button type="button" className="secondary" onClick={() => void resolveMetadata()} disabled={status === 'loading'}>
-              Resolve metadata
-            </button>
-            <button
-              type="button"
-              onClick={() => void (isArtistCatalog ? startArtistCatalog() : createDryRunPlan())}
-              disabled={!canCreateDryRun}
-            >
-              {isArtistCatalog ? 'Review artist uploads' : 'Create dry run'}
-            </button>
-          </div>
-        </section>
+        <SourcePanel
+          rawInput={rawInput}
+          onRawInputChange={setRawInput}
+          onScanSource={() => void scanSource()}
+          onParseInput={() => void parseInput()}
+          onResolveMetadata={() => void resolveMetadata()}
+          canScan={canScanSource}
+          status={status}
+        />
 
         {status === 'loading' ? <p className="state">Working...</p> : null}
         {error ? (
@@ -535,756 +554,91 @@ export function App(): JSX.Element {
           </section>
         ) : null}
 
-        <section className="results" aria-label="Dry run preview">
-          <article className="panel">
-            <h2>Parsed input</h2>
-            {parsedInput ? (
-              <dl className="details">
-                <div>
-                  <dt>Kind</dt>
-                  <dd>{parsedInput.kind}</dd>
-                </div>
-                <div>
-                  <dt>Artist login</dt>
-                  <dd>{parsedInput.artistLogin ?? parsedInput.normalizedArtistLogin ?? 'not specified'}</dd>
-                </div>
-                <div>
-                  <dt>Upload ID</dt>
-                  <dd>{parsedInput.uploadId ?? 'not specified'}</dd>
-                </div>
-                <div>
-                  <dt>Resolver status</dt>
-                  <dd>{dryRunPlan?.resolverStatus ?? resolvedMetadata?.status ?? 'not run'}</dd>
-                </div>
-                <div>
-                  <dt>Source type</dt>
-                  <dd>{dryRunPlan?.metadataSource ?? resolvedMetadata?.metadataSource ?? 'unresolved'}</dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="empty">Enter a ccMixter input and parse it to see the local interpretation.</p>
-            )}
-          </article>
+        <TechnicalDetails
+          parsedInput={parsedInput}
+          dryRunPlan={dryRunPlan}
+          resolvedMetadata={resolvedMetadata}
+          catalogCounts={catalogCounts}
+          catalogIsLoadingMore={catalogIsLoadingMore}
+          hasMore={catalogSessionState?.hasMore ?? false}
+          pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
+        />
 
-          <article className="panel preview-panel">
-            <h2>{isArtistCatalog ? 'Review artist uploads' : 'Planned paths below root folder'}</h2>
-            {dryRunPlan ? (
-              <>
-                <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
-                {reviewSession ? (
-                  <ReviewGroupList reviewSession={reviewSession} onChange={setReviewSession} />
-                ) : (
-                  <GroupList groups={dryRunPlan.groups} />
-                )}
-                {isArtistCatalog ? <div ref={sentinelRef} id="catalog-scroll-sentinel" /> : null}
-                <ul className="path-list">
-                  {reviewedDryRunPlan?.plannedFiles.map((file, index) => (
-                    <li key={`${file.targetRelativePath}-${index}`}>
-                      <span>{file.targetRelativePath}</span>
-                    </li>
-                  ))}
-                </ul>
-                <ul className="warning-list">
-                  {reviewedDryRunPlan?.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-                {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
-                  <DownloadPanel
-                    advisoryJob={advisoryDownloadJob}
-                    advisorySummary={advisoryDownloadSummary}
-                    advisoryValidationOk={advisoryDownloadValidation.ok}
-                    canPrepareDownload={canPrepareDownload}
-                    downloadJob={downloadJob}
-                    downloadQueueState={downloadQueueState}
-                    downloadResult={downloadResult}
-                    archivePreviews={archivePreviews}
-                    archivePreviewErrors={archivePreviewErrors}
-                    isArtistCatalog={isArtistCatalog}
-                    onCancel={(jobId) => void cancelDownloadJob(jobId)}
-                    onConfirm={(jobId) => void confirmDownloadJob(jobId)}
-                    onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
-                    onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
-                    status={status}
-                  />
-                ) : null}
-              </>
-            ) : resolvedMetadata ? (
-              <>
-                <GroupList groups={resolvedMetadata.groups} />
-                {catalogCounts ? <ArtistCatalogCounts counts={catalogCounts} catalogIsLoadingMore={catalogIsLoadingMore} hasMore={catalogSessionState?.hasMore ?? false} pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false} /> : null}
-                {resolvedMetadata.warnings.length > 0 ? (
-                  <ul className="warning-list">
-                    {resolvedMetadata.warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </>
-            ) : (
-              <p className="empty">
-                Choose a Stem Library Root Folder, then create a dry run to preview artist/song/file paths.
-              </p>
-            )}
-          </article>
+        {isArtistCatalog ? (
+          <section className="banner artist-scan-banner" role="status">
+            <strong>Review artist uploads</strong>
+            <span>{ARTIST_SCAN_REALITY_CHECK_WARNING}</span>
+          </section>
+        ) : null}
+
+        {warningTiers.global.length > 0 ? (
+          <ul className="warning-list warning-list--global" aria-label="Global warnings">
+            {warningTiers.global.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        <section className="results" aria-label="Upload review">
+          {listMode ? (
+            <UploadListDetail mode={listMode} selectedGroupId={selectedGroupId} onSelectGroup={setSelectedGroupId} />
+          ) : (
+            <p className="empty">
+              {stemLibraryRoot
+                ? 'Enter a ccMixter artist, upload link, or upload ID to scan available uploads. No downloads will start without confirmation.'
+                : 'Stem library not set. You can scan sources now, but choose a folder before creating a download plan.'}
+            </p>
+          )}
+
+          {isArtistCatalog ? <div ref={sentinelRef} id="catalog-scroll-sentinel" /> : null}
+
+          {dryRunPlan ? (
+            <>
+              <p className="root-path">{dryRunPlan.stemLibraryRoot.path}</p>
+              <ul className="path-list">
+                {reviewedDryRunPlan?.plannedFiles.map((file, index) => (
+                  <li key={`${file.targetRelativePath}-${index}`}>
+                    <span>{file.targetRelativePath}</span>
+                  </li>
+                ))}
+              </ul>
+              {reviewedDryRunPlan && advisoryDownloadJob && advisoryDownloadSummary && advisoryDownloadValidation ? (
+                <DownloadPanel
+                  advisoryJob={advisoryDownloadJob}
+                  advisorySummary={advisoryDownloadSummary}
+                  advisoryValidationOk={advisoryDownloadValidation.ok}
+                  canPrepareDownload={canPrepareDownload}
+                  downloadJob={downloadJob}
+                  downloadQueueState={downloadQueueState}
+                  downloadResult={downloadResult}
+                  archivePreviews={archivePreviews}
+                  archivePreviewErrors={archivePreviewErrors}
+                  isArtistCatalog={isArtistCatalog}
+                  onCancel={(jobId) => void cancelDownloadJob(jobId)}
+                  onConfirm={(jobId) => void confirmDownloadJob(jobId)}
+                  onPrepare={() => void prepareDownloadJob(reviewedDryRunPlan)}
+                  onPreviewArchive={(jobId, fileJobId) => void previewArchiveDownload(jobId, fileJobId)}
+                  status={status}
+                />
+              ) : null}
+            </>
+          ) : null}
         </section>
-      </section>
+      </div>
+
+      <StatusBar
+        stemLibraryRoot={stemLibraryRoot}
+        onChooseRoot={() => void chooseStemLibraryRoot()}
+        isArtistCatalog={isArtistCatalog}
+        catalogCounts={catalogCounts}
+        catalogIsLoadingMore={catalogIsLoadingMore}
+        hasMore={catalogSessionState?.hasMore ?? false}
+        pagingIncomplete={catalogSessionState?.pagingIncomplete ?? false}
+        sourceMode={dryRunPlan?.metadataSource ?? resolvedMetadata?.metadataSource ?? null}
+        plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
+        status={status}
+      />
     </main>
-  );
-}
-
-interface ArtistCatalogCounts {
-  loadedCount: number;
-  totalCount?: number;
-  plannedFileCount: number;
-  includedFileCount: number;
-}
-
-function resolveArtistCatalogCounts(
-  catalogSessionState: ArtistCatalogState | null,
-  resolvedMetadata: ResolvedCcmixterMetadata | null,
-  dryRunPlan: DryRunPlan | null,
-  reviewedDryRunPlan: DryRunPlan | null
-): ArtistCatalogCounts | null {
-  if (catalogSessionState) {
-    return {
-      loadedCount: catalogSessionState.loadedCount,
-      totalCount: catalogSessionState.totalCount,
-      plannedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
-      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
-    };
-  }
-
-  if (dryRunPlan || resolvedMetadata) {
-    const uploadIds = new Set(
-      (dryRunPlan?.groups.flatMap((group) => group.uploads) ?? resolvedMetadata?.uploads ?? []).map((upload) => upload.uploadId)
-    );
-
-    return {
-      loadedCount: uploadIds.size,
-      totalCount: undefined,
-      plannedFileCount: dryRunPlan?.plannedFiles.length ?? resolvedMetadata?.files.length ?? 0,
-      includedFileCount: reviewedDryRunPlan?.plannedFiles.length ?? 0
-    };
-  }
-
-  return null;
-}
-
-export function resolveArtistCatalogStatus(
-  hasMore: boolean,
-  loadedCount: number,
-  totalCount: number | undefined,
-  catalogIsLoadingMore: boolean,
-  pagingIncomplete = false
-): string | null {
-  if (catalogIsLoadingMore) {
-    return 'Loading more uploads…';
-  }
-
-  if (pagingIncomplete) {
-    return `Catalog incomplete: ${loadedCount}${typeof totalCount === 'number' ? ` of ${totalCount}` : ''} loaded`;
-  }
-
-  if (hasMore) {
-    return loadedCount > 0 ? 'More uploads available' : null;
-  }
-
-  if (loadedCount > 0) {
-    // Only claim completion when the loaded count actually reaches the known total (or no total is
-    // known and the source itself reported it was exhausted) - never on a paging source giving up early.
-    if (typeof totalCount === 'number' && loadedCount < totalCount) {
-      return `${loadedCount} of ${totalCount} loaded`;
-    }
-    return `All ${typeof totalCount === 'number' ? totalCount : loadedCount} uploads loaded`;
-  }
-
-  return null;
-}
-
-function ArtistCatalogCounts({
-  counts,
-  catalogIsLoadingMore,
-  hasMore,
-  pagingIncomplete
-}: {
-  counts: ArtistCatalogCounts;
-  catalogIsLoadingMore: boolean;
-  hasMore: boolean;
-  pagingIncomplete: boolean;
-}): JSX.Element {
-  const status = resolveArtistCatalogStatus(hasMore, counts.loadedCount, counts.totalCount, catalogIsLoadingMore, pagingIncomplete);
-
-  return (
-    <dl className="details compact artist-catalog-counts" aria-label="Artist catalog scan counts">
-      <div>
-        <dt>Loaded uploads</dt>
-        <dd>
-          {counts.loadedCount}
-          {typeof counts.totalCount === 'number' ? ` of ${counts.totalCount}` : ''}
-        </dd>
-      </div>
-      <div>
-        <dt>Total uploads</dt>
-        <dd>{typeof counts.totalCount === 'number' ? counts.totalCount : 'unknown'}</dd>
-      </div>
-      <div>
-        <dt>Has more</dt>
-        <dd>{hasMore ? 'true' : 'false'}</dd>
-      </div>
-      <div>
-        <dt>Planned files</dt>
-        <dd>{counts.plannedFileCount}</dd>
-      </div>
-      <div>
-        <dt>Included files</dt>
-        <dd>{counts.includedFileCount}</dd>
-      </div>
-      {status ? <div><dt>Status</dt><dd>{status}</dd></div> : null}
-    </dl>
-  );
-}
-
-function DownloadPanel({
-  advisoryJob,
-  advisorySummary,
-  advisoryValidationOk,
-  canPrepareDownload,
-  downloadJob,
-  downloadQueueState,
-  downloadResult,
-  archivePreviews,
-  archivePreviewErrors,
-  isArtistCatalog,
-  onCancel,
-  onConfirm,
-  onPrepare,
-  onPreviewArchive,
-  status
-}: {
-  advisoryJob: DownloadJob;
-  advisorySummary: ReturnType<typeof summarizeDownloadJob>;
-  advisoryValidationOk: boolean;
-  canPrepareDownload: boolean;
-  downloadJob: DownloadJob | null;
-  downloadQueueState: DownloadQueueState | null;
-  downloadResult: DownloadResult | null;
-  archivePreviews: Record<string, ArchivePreview>;
-  archivePreviewErrors: Record<string, string>;
-  isArtistCatalog: boolean;
-  onCancel: (jobId: string) => void;
-  onConfirm: (jobId: string) => void;
-  onPrepare: () => void;
-  onPreviewArchive: (jobId: string, fileJobId: string) => void;
-  status: Status;
-}): JSX.Element {
-  const jobForSummary = downloadJob ?? advisoryJob;
-  const summary = downloadJob ? summarizeDownloadJob(downloadJob) : advisorySummary;
-  const canConfirm =
-    downloadJob !== null &&
-    downloadJob.status === 'queued' &&
-    summarizeDownloadJob(downloadJob).writableFiles > 0 &&
-    downloadJob.errors.length === 0 &&
-    status !== 'loading';
-  const isRunning = downloadQueueState?.status === 'running';
-
-  return (
-    <section className="download-panel" aria-label="Download confirmation and progress">
-      <div className="download-heading">
-        <div>
-          <h3>Download</h3>
-          <span>{summary.writableFiles} writable file(s)</span>
-        </div>
-        <span className={`source-badge status-${downloadQueueState?.status ?? downloadJob?.status ?? 'queued'}`}>
-          {downloadQueueState?.status ?? downloadJob?.status ?? 'not prepared'}
-        </span>
-      </div>
-
-      <dl className="details compact">
-        <div>
-          <dt>Target root</dt>
-          <dd>{summary.targetRoot}</dd>
-        </div>
-        <div>
-          <dt>Skipped</dt>
-          <dd>{summary.skippedFiles}</dd>
-        </div>
-        <div>
-          <dt>Blocked files</dt>
-          <dd>{summary.blockedFiles}</dd>
-        </div>
-        <div>
-          <dt>Warnings</dt>
-          <dd>{summary.warnings.length}</dd>
-        </div>
-        <div>
-          <dt>Blocking errors</dt>
-          <dd>{advisoryValidationOk ? summary.errors.length : 'blocking'}</dd>
-        </div>
-      </dl>
-
-      <div className="download-actions">
-        <button type="button" onClick={onPrepare} disabled={!canPrepareDownload}>
-          {isArtistCatalog ? 'Prepare selected uploads' : 'Start Download'}
-        </button>
-        <button type="button" className="secondary" onClick={() => onConfirm(downloadJob!.jobId)} disabled={!canConfirm}>
-          Confirm Download
-        </button>
-        <button type="button" className="secondary" onClick={() => onCancel(downloadQueueState!.jobId)} disabled={!isRunning}>
-          Cancel
-        </button>
-      </div>
-
-      {downloadJob && !downloadQueueState ? (
-        <p className="confirmation-note">
-          Confirm to write {summary.writableFiles} file(s) under {downloadJob.stemLibraryRootPath}.
-        </p>
-      ) : null}
-
-      <ul className="path-list download-file-list">
-        {jobForSummary.files.map((file) => {
-          const stateFile = downloadQueueState?.files.find((candidate) => candidate.fileJobId === file.fileJobId);
-          const displayFile = stateFile ?? file;
-          const archivePreview = archivePreviews[file.fileJobId];
-          const archivePreviewError = archivePreviewErrors[file.fileJobId];
-
-          return (
-            <li key={file.fileJobId}>
-              <span>{file.targetRelativePath}</span>
-              <small>
-                {displayFile.status}
-                {typeof displayFile.receivedBytes === 'number' ? ` / ${formatBytes(displayFile.receivedBytes)}` : ''}
-                {typeof displayFile.totalBytes === 'number' ? ` of ${formatBytes(displayFile.totalBytes)}` : ''}
-                {typeof displayFile.totalBytes !== 'number' ? ' / total unknown' : ''}
-              </small>
-              {file.fileKind === 'archive' ? (
-                <div className="archive-preview-actions">
-                  <button
-                    type="button"
-                    className="secondary compact-button"
-                    onClick={() => onPreviewArchive(jobForSummary.jobId, file.fileJobId)}
-                    disabled={!downloadJob || status === 'loading'}
-                  >
-                    Preview archive contents
-                  </button>
-                  <span>Archive preview is informational; extraction is not implemented yet.</span>
-                </div>
-              ) : null}
-              {archivePreviewError ? <p className="archive-preview-error">{archivePreviewError}</p> : null}
-              {archivePreview ? <ArchivePreviewDetails preview={archivePreview} /> : null}
-            </li>
-          );
-        })}
-      </ul>
-
-      {downloadQueueState ? (
-        <p className="state">
-          {downloadQueueState.progress.completedFiles} of {downloadQueueState.progress.totalFiles} completed;{' '}
-          {downloadQueueState.progress.skippedFiles} skipped; {downloadQueueState.progress.blockedFiles} blocked;{' '}
-          {downloadQueueState.progress.failedFiles} failed.
-        </p>
-      ) : null}
-
-      {downloadResult ? (
-        <p className="state">
-          Result: {downloadResult.status} ({downloadResult.completedFiles} completed, {downloadResult.skippedFiles} skipped,{' '}
-          {downloadResult.failedFiles} failed, {downloadResult.cancelledFiles} cancelled)
-        </p>
-      ) : null}
-
-      {summary.warnings.length > 0 ? (
-        <ul className="warning-list">
-          {summary.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {summary.errors.length > 0 ? (
-        <ul className="warning-list error-list">
-          {summary.errors.map((downloadError) => (
-            <li key={`${downloadError.code}-${downloadError.message}`}>
-              {downloadError.code}: {downloadError.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
-}
-
-function ArchivePreviewDetails({ preview }: { preview: ArchivePreview }): JSX.Element {
-  const blockingWarnings = preview.warnings.filter((warning) => warning.blocking);
-
-  return (
-    <div className="archive-preview" aria-label="Archive extraction preview">
-      <dl className="details compact">
-        <div>
-          <dt>Entries</dt>
-          <dd>{preview.entryCount}</dd>
-        </div>
-        <div>
-          <dt>Safe to extract</dt>
-          <dd>{preview.safeToExtract ? 'yes' : 'no'}</dd>
-        </div>
-      </dl>
-      <ul className="archive-entry-list">
-        {preview.entries.map((entry, index) => (
-          <li className={entry.blocked ? 'blocked-archive-entry' : undefined} key={`${entry.originalPath}-${index}`}>
-            <span>{entry.targetRelativePath ?? entry.originalPath}</span>
-            <small>
-              {entry.type}
-              {typeof entry.sizeBytes === 'number' ? ` / ${formatBytes(entry.sizeBytes)}` : ' / size unknown'}
-              {entry.extension ? ` / ${entry.extension}` : ''}
-            </small>
-          </li>
-        ))}
-      </ul>
-      {blockingWarnings.length > 0 ? (
-        <ul className="warning-list error-list">
-          {blockingWarnings.map((warning) => (
-            <li key={`${warning.code}-${warning.entryPath ?? warning.message}`}>
-              {warning.code}: {warning.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {preview.warnings.some((warning) => !warning.blocking) ? (
-        <ul className="warning-list">
-          {preview.warnings
-            .filter((warning) => !warning.blocking)
-            .map((warning) => (
-              <li key={`${warning.code}-${warning.entryPath ?? warning.message}`}>
-                {warning.code}: {warning.message}
-              </li>
-            ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-function ReviewGroupList({
-  reviewSession,
-  onChange
-}: {
-  reviewSession: ReviewSession;
-  onChange: (session: ReviewSession) => void;
-}): JSX.Element {
-  if (reviewSession.groups.length === 0) {
-    return <p className="empty">No review groups are available yet.</p>;
-  }
-
-  return (
-    <div className="group-list">
-      <div className="review-actions candidate-actions" aria-label="Review file selection actions">
-        <button type="button" className="secondary" onClick={() => onChange(includeRecommendedDownloadCandidates(reviewSession))}>
-          Include recommended source/stem/archive files
-        </button>
-        <button type="button" className="secondary" onClick={() => onChange(excludePreviewDownloadCandidates(reviewSession))}>
-          Exclude previews
-        </button>
-        <button type="button" className="secondary" onClick={() => onChange(excludeArchiveDownloadCandidates(reviewSession))}>
-          Exclude archives
-        </button>
-        <button type="button" className="secondary" onClick={() => onChange(clearIncludedDownloadCandidates(reviewSession))}>
-          Clear all included files
-        </button>
-      </div>
-      {reviewSession.groups.map((group) => {
-        const availableMergeTargets = reviewSession.groups.filter((candidate) => candidate.reviewGroupId !== group.reviewGroupId);
-
-        return (
-          <section className="group-summary" key={group.reviewGroupId}>
-            <div className="group-heading">
-              <div>
-                <h3>{group.songFolderName}</h3>
-                <span>{group.artistName}</span>
-              </div>
-              <span className={`source-badge status-${group.status}`}>{group.status}</span>
-            </div>
-
-            <div className="review-actions">
-              <button type="button" className="secondary" onClick={() => onChange(markGroupAccepted(reviewSession, group.reviewGroupId))}>
-                Accept
-              </button>
-              <button type="button" className="secondary" onClick={() => onChange(markGroupNeedsReview(reviewSession, group.reviewGroupId))}>
-                Needs review
-              </button>
-              <button type="button" className="secondary" onClick={() => onChange(resetGroupOverrides(reviewSession, group.reviewGroupId))}>
-                Reset
-              </button>
-              {availableMergeTargets.length > 0 ? (
-                <select
-                  aria-label={`Merge ${group.songFolderName}`}
-                  defaultValue=""
-                  onChange={(event) => {
-                    if (event.target.value) {
-                      onChange(mergeGroups(reviewSession, group.reviewGroupId, event.target.value));
-                      event.target.value = '';
-                    }
-                  }}
-                >
-                  <option value="">Merge into...</option>
-                  {availableMergeTargets.map((targetGroup) => (
-                    <option key={targetGroup.reviewGroupId} value={targetGroup.reviewGroupId}>
-                      {targetGroup.songFolderName}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
-            </div>
-
-            <div className="edit-grid">
-              <label className="field">
-                <span>Artist folder</span>
-                <input
-                  value={group.artistName}
-                  onChange={(event) => onChange(renameArtist(reviewSession, group.reviewGroupId, event.target.value))}
-                />
-              </label>
-              <label className="field">
-                <span>Song folder</span>
-                <input
-                  value={group.songFolderName}
-                  onChange={(event) => onChange(renameGroup(reviewSession, group.reviewGroupId, event.target.value))}
-                />
-              </label>
-            </div>
-
-            {group.artistName !== group.originalGroup.artist || group.songFolderName !== group.originalGroup.canonicalSongTitle ? (
-              <p className="original-note">
-                Resolver: {group.originalGroup.artist} / {group.originalGroup.canonicalSongTitle}
-              </p>
-            ) : null}
-
-            <ReviewMetadata group={group} />
-
-            <ul className="candidate-list">
-              {group.files.map((file) => (
-                <li className={file.included ? undefined : 'excluded-file'} key={file.fileId}>
-                  <label className="file-toggle">
-                    <input
-                      checked={file.included}
-                      onChange={() => onChange(toggleFileIncluded(reviewSession, file.fileId))}
-                      type="checkbox"
-                    />
-                    <span>{file.included ? 'Included' : 'Excluded'}</span>
-                  </label>
-                  <label className="field file-name-field">
-                    <span>Target file name</span>
-                    <input
-                      value={file.targetFilename}
-                      onChange={(event) => onChange(renameFile(reviewSession, file.fileId, event.target.value))}
-                    />
-                  </label>
-                  {file.targetFilename !== file.originalFilename ? <small>Original: {file.originalFilename}</small> : null}
-                  <CandidateBadges file={file.originalFile} />
-                  {group.files.length > 1 ? (
-                    <button
-                      type="button"
-                      className="secondary compact-button"
-                      onClick={() => onChange(splitGroup(reviewSession, group.reviewGroupId, [file.fileId]))}
-                    >
-                      Split to new group
-                    </button>
-                  ) : null}
-                  {file.overrideWarnings.length > 0 ? (
-                    <ul className="warning-list">
-                      {file.overrideWarnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {file.warnings.length > 0 ? (
-                    <ul className="warning-list">
-                      {file.warnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-
-            {group.overrideWarnings.length > 0 ? (
-              <ul className="warning-list">
-                {group.overrideWarnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-            {group.warnings.length > 0 ? (
-              <ul className="warning-list">
-                {group.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-function ReviewMetadata({ group }: { group: ReviewGroup }): JSX.Element {
-  const firstUpload = group.originalGroup.uploads[0];
-
-  return (
-    <>
-      <dl className="details compact">
-        <div>
-          <dt>Confidence</dt>
-          <dd>{group.originalGroup.confidence}</dd>
-        </div>
-        <div>
-          <dt>BPM</dt>
-          <dd>{group.originalGroup.bpm ?? 'not specified'}</dd>
-        </div>
-        <div>
-          <dt>License</dt>
-          <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd>{group.originalGroup.metadataSource}</dd>
-        </div>
-      </dl>
-      {group.originalGroup.groupingReasons.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Grouping reasons</span>
-          <ul className="reason-list">
-            {group.originalGroup.groupingReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {group.originalGroup.ambiguousUploads.length > 0 ? (
-        <div className="reason-block">
-          <span className="field-label">Ambiguous uploads</span>
-          <ul className="reason-list">
-            {group.originalGroup.ambiguousUploads.map((upload) => (
-              <li key={upload.uploadId}>
-                {upload.title} ({upload.uploadId})
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function GroupList({ groups }: { groups: StemGroup[] }): JSX.Element {
-  if (groups.length === 0) {
-    return <p className="empty">No resolver groups are available yet.</p>;
-  }
-
-  return (
-    <div className="group-list">
-      {groups.map((group) => {
-        const firstUpload = group.uploads[0];
-
-        return (
-          <section className="group-summary" key={group.groupId}>
-            <div className="group-heading">
-              <div>
-                <h3>{group.canonicalSongTitle}</h3>
-                <span>{group.artist}</span>
-              </div>
-              <span className="source-badge">{group.metadataSource}</span>
-            </div>
-            <dl className="details compact">
-              <div>
-                <dt>Confidence</dt>
-                <dd>{group.confidence}</dd>
-              </div>
-              <div>
-                <dt>BPM</dt>
-                <dd>{group.bpm ?? 'not specified'}</dd>
-              </div>
-              <div>
-                <dt>License</dt>
-                <dd>{firstUpload?.licenseSummary ?? 'not specified'}</dd>
-              </div>
-              <div>
-                <dt>Tags</dt>
-                <dd>{firstUpload && firstUpload.tags.length > 0 ? firstUpload.tags.join(', ') : 'not specified'}</dd>
-              </div>
-            </dl>
-            {group.uploads.some((upload) => upload.title !== group.canonicalSongTitle) ? (
-              <div className="title-map">
-                <span className="field-label">Original upload titles</span>
-                <ul>
-                  {group.uploads.map((upload) => (
-                    <li key={upload.uploadId}>
-                      <span>{upload.title}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {group.groupingReasons.length > 0 ? (
-              <div className="reason-block">
-                <span className="field-label">Grouping reasons</span>
-                <ul className="reason-list">
-                  {group.groupingReasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <ul className="candidate-list">
-              {group.files.map((file) => (
-                <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`}>
-                  <span>{file.originalFilename}</span>
-                  <CandidateBadges file={file} />
-                </li>
-              ))}
-            </ul>
-            {group.unverifiedFields.length > 0 ? (
-              <p className="unverified">Unverified: {group.unverifiedFields.join(', ')}</p>
-            ) : null}
-            {group.ambiguousUploads.length > 0 ? (
-              <div className="reason-block">
-                <span className="field-label">Ambiguous uploads</span>
-                <ul className="reason-list">
-                  {group.ambiguousUploads.map((upload) => (
-                    <li key={upload.uploadId}>
-                      {upload.title} ({upload.uploadId})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {group.warnings.length > 0 ? (
-              <ul className="warning-list">
-                {group.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-function CandidateBadges({ file }: { file: ReviewFile['originalFile'] }): JSX.Element {
-  const classification = getDownloadCandidateClassification(file);
-  const label = `${classification.role} / ${classification.format} / ${classification.quality}`;
-  const title = classification.reasons.join(' ');
-
-  return (
-    <div className="candidate-badges" title={title}>
-      <span className="candidate-badge">{label}</span>
-      <span className="candidate-badge confidence-badge">{classification.confidence}</span>
-      <span className="candidate-badge source-badge">{file.metadataSource}</span>
-    </div>
   );
 }
 
@@ -1294,18 +648,6 @@ function toAppError(error: unknown): AppError {
     message: error instanceof Error ? error.message : 'An unexpected renderer error occurred.',
     recoverable: true
   };
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function toInitialDownloadQueueState(job: DownloadJob): DownloadQueueState {

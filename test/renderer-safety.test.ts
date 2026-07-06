@@ -32,7 +32,7 @@ describe('renderer safety', () => {
   });
 
   it('renders artist catalog reality-check copy and scan counts from shared renderer state', async () => {
-    const source = await readFile(path.resolve('src/renderer/ui/App.tsx'), 'utf8');
+    const source = await readAllRendererSource();
 
     expect(source).toContain('ARTIST_SCAN_REALITY_CHECK_WARNING');
     expect(source).toContain('Review artist uploads');
@@ -54,7 +54,7 @@ describe('renderer safety', () => {
   });
 
   it('renders archive preview controls and warning states from shared renderer state', async () => {
-    const source = await readFile(path.resolve('src/renderer/ui/App.tsx'), 'utf8');
+    const source = await readAllRendererSource();
 
     expect(source).toContain('Preview archive contents');
     expect(source).toContain('Archive preview is informational; extraction is not implemented yet.');
@@ -63,7 +63,28 @@ describe('renderer safety', () => {
     expect(source).toContain('blocking');
     expect(source).toContain('previewArchiveDownload');
   });
+
+  it('exposes one primary "Scan source" workflow action instead of separate parse/resolve/dry-run primaries', async () => {
+    const source = await readAllRendererSource();
+
+    expect(source).toContain('Scan source');
+    expect(source).not.toContain('Create dry run');
+  });
+
+  it('collapses technical/debug details by default', async () => {
+    const source = await readAllRendererSource();
+
+    expect(source).toContain('<details className="technical-details">');
+    expect(source).toContain('Technical details');
+    expect(source).not.toMatch(/<details className="technical-details"[^>]*\bopen\b/);
+  });
 });
+
+async function readAllRendererSource(): Promise<string> {
+  const files = await collectRendererSourceFiles(path.resolve('src/renderer'));
+  const contents = await Promise.all(files.map((file) => readFile(file, 'utf8')));
+  return contents.join('\n');
+}
 
 async function collectRendererSourceFiles(root: string): Promise<string[]> {
   const { readdir } = await import('fs/promises');

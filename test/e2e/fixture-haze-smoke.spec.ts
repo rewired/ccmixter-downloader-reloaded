@@ -32,8 +32,8 @@ test('fixture:haze-smoke review and download smoke', async () => {
     await expect(page.getByRole('heading', { name: 'ccMixter Stem Downloader' })).toBeVisible();
     await expect(page.getByText(root)).toBeVisible();
 
-    await page.getByLabel('ccMixter artist, upload link, or upload ID').fill('fixture:haze-smoke');
-    await page.getByRole('button', { name: 'Create dry run' }).click();
+    await page.getByLabel('ccMixter source').fill('fixture:haze-smoke');
+    await page.getByRole('button', { name: 'Scan source' }).click();
 
     await expect(page.getByText('Fixture/sample data: fixture:haze-smoke uses recorded ccMixter metadata for UI smoke testing.')).toBeVisible();
     await expect(page.getByText('preview / mp3 / lossy')).toBeVisible();
