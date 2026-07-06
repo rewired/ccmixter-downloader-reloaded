@@ -14,6 +14,6 @@ describe('main process wiring', () => {
     expect(source).toContain('const electronJsonFetch: typeof fetch');
     expect(source).toContain('net.request({ method: init?.method ?? \'GET\', url })');
     expect(source).toContain('new CcmixterApiClient({ fetchImpl: electronJsonFetch })');
-    expect(source).toContain('new CcmixterHtmlClient({ fetchImpl: electronFetch })');
+    expect(source).toContain('new CcmixterHtmlClient({ fetchImpl: electronFetch, jsonFetchImpl: electronJsonFetch })');
   });
 });

@@ -59,6 +59,11 @@ export interface CcmixterHtmlCatalogResult {
 
 export interface CcmixterHtmlClientOptions {
   fetchImpl?: typeof fetch;
+  // ccMixter's JSON query API (used by the download-action file lookup) echoes its entire response
+  // payload into an "X-JSON" response header, which crashes Electron's net.fetch-backed fetch on any
+  // non-Latin1 character. Callers that hit this should pass a net.request-backed implementation here
+  // (see main/index.ts's electronJsonFetch); defaults to fetchImpl when not provided.
+  jsonFetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
 

@@ -117,7 +117,7 @@ function headerEntries(headers: HeadersInit | undefined): Array<[string, string]
 }
 
 const apiClient = new CcmixterApiClient({ fetchImpl: electronJsonFetch });
-const htmlClient = new CcmixterHtmlClient({ fetchImpl: electronFetch });
+const htmlClient = new CcmixterHtmlClient({ fetchImpl: electronFetch, jsonFetchImpl: electronJsonFetch });
 const ccmixterResolver = new CcmixterResolver({
   apiClient,
   htmlClient

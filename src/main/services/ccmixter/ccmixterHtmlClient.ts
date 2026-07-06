@@ -23,10 +23,12 @@ const NO_VISIBLE_FILE_CANDIDATES_WARNING = 'HTML enrichment did not find visible
 
 export class CcmixterHtmlClient {
   private readonly fetchImpl: typeof fetch;
+  private readonly jsonFetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
   constructor(options: CcmixterHtmlClientOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.jsonFetchImpl = options.jsonFetchImpl ?? this.fetchImpl;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
@@ -125,7 +127,7 @@ export class CcmixterHtmlClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await this.fetchImpl(url.toString(), {
+      const response = await this.jsonFetchImpl(url.toString(), {
         headers: {
           accept: 'application/json'
         },
