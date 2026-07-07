@@ -17,6 +17,7 @@ This subtree contains typed IPC channels, request shapes, response shapes, and s
 * Keep request and response types explicit and narrow.
 * IPC changes are security-relevant and require review against preload exposure.
 * Artist catalog IPC remains narrow: start, load more, and cancel by session ID.
+* Stem pack IPC remains narrow: choose folder, preview folder (read-only), and pack folder. No progress/cancel channels yet, and it is not wired to download job/review results.
 
 ## Work Guidance
 

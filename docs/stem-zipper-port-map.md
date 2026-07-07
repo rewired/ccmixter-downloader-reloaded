@@ -286,9 +286,13 @@ Port the Stem Packing core into [src/main/services/stemPacking/](src/main/servic
 
 Add a narrow IPC/preload contract for folder preview and pack start.
 
+**Status: implemented.** `stem-pack:choose-folder`, `stem-pack:preview-folder`, and `stem-pack:pack-folder` are wired in `src/main/index.ts` and exposed through `src/preload/index.ts` as `chooseStemPackFolder`, `previewStemPackFolder`, and `packStemFolder`. Preview reuses the existing `scanStemFolder` read-only scan (new `previewStemFolder` wrapper in `src/main/services/stemPacking/`) and adds a cheap, size-only heuristic for oversized-stereo-WAV candidates (no per-file audio probing). No progress/cancel channels, no UI, and no coupling to the downloader's download pipeline were added.
+
 ### Slice 4
 
 Build a minimal Package Remix UI in the current app design.
+
+**Status: implemented.** `src/renderer/ui/PackageRemixView.tsx` replaces the Slice 1 placeholder with a self-contained folder-choose/preview/metadata-form/create-package flow built entirely on the Slice 3 preload API (`chooseStemPackFolder`, `previewStemPackFolder`, `packStemFolder`). It keeps its own local component state (no App-level wiring beyond swapping in the component for the `package` tool) so it stays isolated from the downloader's review/download state. No progress/cancel, no preferences/presets, no 7z/volume options, and no shell/open-path integration were added, per this port map's excluded-from-MVP list.
 
 ### Slice 5
 

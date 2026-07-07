@@ -113,18 +113,34 @@ describe('renderer safety', () => {
     expect(en['app.tool.package']).toBe('Package Remix');
   });
 
-  it('keeps the Package Remix placeholder static, with no working buttons', async () => {
-    const source = await readRendererSourceFiles(['src/renderer/ui/PackageRemixPlaceholder.tsx']);
+  it('builds a Package Remix UI around the choose/preview/pack preload API, with no downloader coupling', async () => {
+    const source = await readRendererSourceFiles(['src/renderer/ui/PackageRemixView.tsx']);
 
-    expect(source).not.toContain('<button');
-    expect(source).not.toContain('onClick');
+    expect(source).toContain('window.ccmixterDownloader.chooseStemPackFolder()');
+    expect(source).toContain('window.ccmixterDownloader.previewStemPackFolder(');
+    expect(source).toContain('window.ccmixterDownloader.packStemFolder(');
     expect(source).toContain("t('packageRemix.title')");
+    expect(source).toContain("t('packageRemix.createButton')");
+
+    expect(source).not.toContain('createDownloadJob');
+    expect(source).not.toContain('startDownloadJob');
+    expect(source).not.toContain('reviewSession');
+    expect(source).not.toContain('resolveMetadata');
+    expect(source).not.toContain('parseInput');
 
     expect(en['packageRemix.title']).toBe('Package Remix');
     expect(en['packageRemix.description']).toBe('Create upload-ready stem ZIP packages from your own local remix exports.');
-    expect(en['packageRemix.comingSoon']).toBe(
-      'Folder scanning, metadata, attribution, and stereo WAV splitting will be added in a later slice.'
+  });
+
+  it('disables the Package Remix create button until a folder, packable files, and required metadata are present', async () => {
+    const source = await readRendererSourceFiles(['src/renderer/ui/PackageRemixView.tsx']);
+
+    expect(source).toContain('<button type="submit" disabled={!canCreatePackage}>');
+    expect(source).toContain('Boolean(folderPath) && !previewLoading && !packLoading && hasPackableFiles && isMetadataValid && hasValidMaxSize');
+    expect(source).toContain(
+      "metadata.title.trim().length > 0 && metadata.artist.trim().length > 0 && metadata.license.trim().length > 0"
     );
+    expect(source).toContain('hasPackableFiles = (preview?.packableFileCount ?? 0) > 0');
   });
 });
 

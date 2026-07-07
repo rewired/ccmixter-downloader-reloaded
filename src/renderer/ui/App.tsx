@@ -25,7 +25,7 @@ import { t } from '../i18n';
 
 import { resolveArtistCatalogCounts } from './catalogStatus';
 import { DownloadScreen } from './DownloadScreen';
-import { PackageRemixPlaceholder } from './PackageRemixPlaceholder';
+import { PackageRemixView } from './PackageRemixView';
 import { SourcePanel } from './SourcePanel';
 import { StatusBar } from './StatusBar';
 import { TechnicalDetails } from './TechnicalDetails';
@@ -540,7 +540,7 @@ export function App(): JSX.Element {
         ) : null}
 
         {activeTool === 'package' ? (
-          <PackageRemixPlaceholder />
+          <PackageRemixView />
         ) : screen === 'download' && downloadJob ? (
           <DownloadScreen
             job={downloadJob}

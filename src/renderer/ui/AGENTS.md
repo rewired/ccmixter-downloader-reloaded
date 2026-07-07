@@ -21,6 +21,7 @@ This subtree contains React UI components and UI helper modules for search, deta
 * Review and Download are separate user states: Review is for choosing/renaming files (`UploadListDetail`); Download (`DownloadScreen`) shows progress and result only, with no editing and no archive inspection.
 * Follow the design contract in `docs/DESIGN.md`: preserve the accepted dark color palette, compact low-radius panel chrome, no decorative source-panel gradient, and bottom status bar. Do not change font sizes without explicit user sign-off; weights and density may be tuned.
 * ZIP content disclosure (`ArchiveDisclosure` in `UploadListDetail.tsx`) must render all entries when opened, borderless, with no truncation.
+* `PackageRemixView.tsx` is the Package Remix tool surface (local remix export packaging). It owns its own component state and calls the stem-pack preload API (`chooseStemPackFolder`, `previewStemPackFolder`, `packStemFolder`) directly; it must not read from or write to the downloader's review/download/catalog state, and must not call ccMixter API preload methods.
 
 ## Work Guidance
 

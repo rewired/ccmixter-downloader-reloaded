@@ -13,15 +13,25 @@ import {
   type DownloadResult,
   type DryRunPlan,
   type ResolvedCcmixterMetadata,
-  type StemLibraryRoot
+  type StemLibraryRoot,
+  type StemPackFolderRequest,
+  type StemPackPreviewResult,
+  type StemPackResult
 } from '../shared/domain';
-import { IPC_CHANNELS, type AppInfo, type ChooseStemLibraryRootResult, type IpcResult } from '../shared/ipc';
+import {
+  IPC_CHANNELS,
+  type AppInfo,
+  type ChooseStemLibraryRootResult,
+  type IpcResult,
+  type StemPackChooseFolderResult
+} from '../shared/ipc';
 import { ArchiveInspectionService } from './services/archive/archiveInspectionService';
 import { ArtistCatalogSessionManager } from './services/ccmixter/artistCatalogSessionManager';
 import { CcmixterApiClient } from './services/ccmixter/ccmixterApiClient';
 import { CcmixterHtmlClient } from './services/ccmixter/ccmixterHtmlClient';
 import { CcmixterResolver } from './services/ccmixter/ccmixterResolver';
 import { DownloadManager } from './services/download/downloadManager';
+import { packStemFolder, previewStemFolder, StemPackError } from './services/stemPacking';
 import { SettingsStore } from './settings';
 
 // Electron's net.fetch can surface certain lower-level networking failures (e.g. a legacy
@@ -396,6 +406,60 @@ function registerIpcHandlers(): void {
           true,
           error
         );
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.chooseStemPackFolder, async (): Promise<StemPackChooseFolderResult> => {
+    const focusedWindow = BrowserWindow.getFocusedWindow() ?? undefined;
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose Remix Export Folder',
+      properties: ['openDirectory']
+    };
+    const result = focusedWindow
+      ? await dialog.showOpenDialog(focusedWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    const selectedPath = result.filePaths[0];
+    if (result.canceled || !selectedPath) {
+      return { cancelled: true, folderPath: null };
+    }
+
+    return { cancelled: false, folderPath: selectedPath };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.previewStemPackFolder,
+    async (_event, folderPath: string): Promise<IpcResult<StemPackPreviewResult>> => {
+      if (!isValidFolderPath(folderPath)) {
+        return errorResult('STEM_PACK_FOLDER_INVALID', 'Choose a valid local folder before previewing.', true);
+      }
+
+      try {
+        return { ok: true, value: await previewStemFolder(folderPath) };
+      } catch (error) {
+        if (error instanceof StemPackError) {
+          return errorResult(error.code, error.message, true, error);
+        }
+        return errorResult('STEM_PACK_PREVIEW_FAILED', 'The folder could not be previewed.', true, error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.packStemFolder,
+    async (_event, request: StemPackFolderRequest): Promise<IpcResult<StemPackResult>> => {
+      if (!request || !isValidFolderPath(request.folderPath)) {
+        return errorResult('STEM_PACK_FOLDER_INVALID', 'Choose a valid local folder before packing.', true);
+      }
+
+      try {
+        return { ok: true, value: await packStemFolder(request) };
+      } catch (error) {
+        if (error instanceof StemPackError) {
+          return errorResult(error.code, error.message, true, error);
+        }
+        return errorResult('STEM_PACK_FAILED', 'Packing the folder into ZIP archives failed.', true, error);
       }
     }
   );

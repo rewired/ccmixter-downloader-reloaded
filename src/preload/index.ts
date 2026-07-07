@@ -4,7 +4,8 @@ import type {
   AppInfo,
   CcmixterDownloaderApi,
   ChooseStemLibraryRootResult,
-  IpcResult
+  IpcResult,
+  StemPackChooseFolderResult
 } from '../shared/ipc';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
@@ -18,7 +19,10 @@ import type {
   DownloadResult,
   DryRunPlan,
   ResolvedCcmixterMetadata,
-  StemLibraryRoot
+  StemLibraryRoot,
+  StemPackFolderRequest,
+  StemPackPreviewResult,
+  StemPackResult
 } from '../shared/domain';
 
 const api: CcmixterDownloaderApi = {
@@ -47,6 +51,12 @@ const api: CcmixterDownloaderApi = {
     ipcRenderer.invoke(IPC_CHANNELS.artistCatalogLoadMore, sessionId) as Promise<IpcResult<ArtistCatalogPageResult>>,
   artistCatalogCancel: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.artistCatalogCancel, sessionId) as Promise<IpcResult<ArtistCatalogPageResult>>,
+  chooseStemPackFolder: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseStemPackFolder) as Promise<StemPackChooseFolderResult>,
+  previewStemPackFolder: (folderPath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.previewStemPackFolder, folderPath) as Promise<IpcResult<StemPackPreviewResult>>,
+  packStemFolder: (request: StemPackFolderRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.packStemFolder, request) as Promise<IpcResult<StemPackResult>>,
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: DownloadProgress): void => callback(progress);
     ipcRenderer.on(IPC_CHANNELS.downloadProgress, listener);

@@ -230,7 +230,7 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   }
 }
 
-async function isDirectory(candidatePath: string): Promise<boolean> {
+export async function isDirectory(candidatePath: string): Promise<boolean> {
   try {
     const stats = await fs.stat(candidatePath);
     return stats.isDirectory();

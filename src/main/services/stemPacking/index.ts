@@ -1,4 +1,5 @@
 export { packStemFolder } from './packStemFolder';
+export { previewStemFolder } from './previewStemFolder';
 export { StemPackError } from './types';
 export type { ExtraZipEntry } from './types';
 export { probeWavFormat } from './audioProbe';

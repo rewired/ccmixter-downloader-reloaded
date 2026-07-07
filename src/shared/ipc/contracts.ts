@@ -10,7 +10,10 @@ import type {
   DownloadResult,
   DryRunPlan,
   ResolvedCcmixterMetadata,
-  StemLibraryRoot
+  StemLibraryRoot,
+  StemPackFolderRequest,
+  StemPackPreviewResult,
+  StemPackResult
 } from '../domain';
 
 export const IPC_CHANNELS = {
@@ -29,7 +32,10 @@ export const IPC_CHANNELS = {
   downloadCompleted: 'download:completed',
   artistCatalogStart: 'ccmixter:artist-catalog-start',
   artistCatalogLoadMore: 'ccmixter:artist-catalog-load-more',
-  artistCatalogCancel: 'ccmixter:artist-catalog-cancel'
+  artistCatalogCancel: 'ccmixter:artist-catalog-cancel',
+  chooseStemPackFolder: 'stem-pack:choose-folder',
+  previewStemPackFolder: 'stem-pack:preview-folder',
+  packStemFolder: 'stem-pack:pack-folder'
 } as const;
 
 export interface AppInfo {
@@ -40,6 +46,11 @@ export interface AppInfo {
 export interface ChooseStemLibraryRootResult {
   cancelled: boolean;
   root: StemLibraryRoot | null;
+}
+
+export interface StemPackChooseFolderResult {
+  cancelled: boolean;
+  folderPath: string | null;
 }
 
 export type IpcResult<T> =
@@ -67,6 +78,9 @@ export interface CcmixterDownloaderApi {
   artistCatalogStart(artistLogin: string, sourceUrl?: string): Promise<IpcResult<ArtistCatalogState>>;
   artistCatalogLoadMore(sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>>;
   artistCatalogCancel(sessionId: string): Promise<IpcResult<ArtistCatalogPageResult>>;
+  chooseStemPackFolder(): Promise<StemPackChooseFolderResult>;
+  previewStemPackFolder(folderPath: string): Promise<IpcResult<StemPackPreviewResult>>;
+  packStemFolder(request: StemPackFolderRequest): Promise<IpcResult<StemPackResult>>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   onDownloadCompleted(callback: (result: DownloadResult) => void): () => void;
 }

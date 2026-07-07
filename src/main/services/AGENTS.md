@@ -35,5 +35,5 @@ This subtree contains Main Process service modules for ccMixter access, download
 * `ccmixter/` contains ccMixter API, HTML, resolver, and artist catalog services.
 * `download/` contains download planning and manager services.
 * `grouping/` contains stem grouping services.
-* `stemPacking/` contains the local-folder Stem Packing engine (scan, probe, split, ZIP, metadata) for the future Package Remix tool. It is not wired to download results; see `docs/adr/0002-stem-packing-engine.md` and `docs/stem-zipper-port-map.md`.
+* `stemPacking/` contains the local-folder Stem Packing engine (scan, probe, split, ZIP, metadata, read-only preview) for the future Package Remix tool. It is exposed through a narrow choose/preview/pack IPC surface (`src/shared/ipc/contracts.ts`, `src/main/index.ts`, `src/preload/index.ts`) but is not wired to download results; see `docs/adr/0002-stem-packing-engine.md` and `docs/stem-zipper-port-map.md`.
 * These service-domain folders do not currently have separate child `AGENTS.md` files.
