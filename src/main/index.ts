@@ -148,6 +148,12 @@ const createWindow = (): void => {
     }
   });
 
+  if (shouldOpenDevTools()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    });
+  }
+
   void mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 };
 
@@ -398,6 +404,10 @@ function getE2EStemLibraryRootPath(): string | null {
   }
 
   return e2eRootPath;
+}
+
+function shouldOpenDevTools(): boolean {
+  return !app.isPackaged && process.env.CCMIXTER_OPEN_DEVTOOLS === '1';
 }
 
 function isValidFolderPath(folderPath: string): boolean {

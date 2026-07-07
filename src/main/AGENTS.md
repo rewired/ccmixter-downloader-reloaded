@@ -22,6 +22,7 @@ This subtree contains Electron Main Process logic, privileged application servic
 * Prefer async service APIs with explicit error handling.
 * Avoid magic IPC channel strings outside shared IPC contracts.
 * Security-relevant changes to windows, sessions, IPC, or networking require brief justification in the task closeout.
+* Use `CCMIXTER_OPEN_DEVTOOLS=1` for unpackaged development runs that should open detached Electron DevTools.
 
 ## Verification
 
