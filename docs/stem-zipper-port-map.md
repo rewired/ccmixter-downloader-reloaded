@@ -81,19 +81,19 @@ A realistic MVP is about 1–2 engineer-weeks for the core service and a thin en
 
 ### Do not port
 
-- [_import/stem-zipper-main/app/src/features]( _import/stem-zipper-main/app/src/features))
+- [_import/stem-zipper-main/app/src/features](_import/stem-zipper-main/app/src/features))
   - Do not port the old UI, file table, metadata modal, route state, or pack controls.
 
-- [_import/stem-zipper-main/app/src/styles]( _import/stem-zipper-main/app/src/styles)) and Tailwind setup
+- [_import/stem-zipper-main/app/src/styles](_import/stem-zipper-main/app/src/styles)) and Tailwind setup
   - Do not port styling or Tailwind configuration.
 
-- [_import/stem-zipper-main/app/src/routes]( _import/stem-zipper-main/app/src/routes))
+- [_import/stem-zipper-main/app/src/routes](_import/stem-zipper-main/app/src/routes))
   - Do not port old routing or shell composition.
 
 - [_import/stem-zipper-main/app/electron/preload.ts](_import/stem-zipper-main/app/electron/preload.ts) and old preload/IPC wholesale
   - Do not port the old bridge or IPC model as-is.
 
-- [_import/stem-zipper-main/app/locales]( _import/stem-zipper-main/app/locales))
+- [_import/stem-zipper-main/app/locales](_import/stem-zipper-main/app/locales))
   - Do not port i18n for MVP unless a small, dedicated English-only copy layer is needed.
 
 - [_import/stem-zipper-main/app/package.json](_import/stem-zipper-main/app/package.json), Vite/Electron build config, and packaging scripts
@@ -107,7 +107,7 @@ A realistic MVP is about 1–2 engineer-weeks for the core service and a thin en
 | Dependency | Why it is needed | MVP | Recommendation |
 | --- | --- | --- | --- |
 | `yazl` | Core ZIP creation path for writing archive files. | Yes | Add now. |
-| `wavefile` | Useful for richer WAV parsing/writing, but not strictly required for the inspected implementation. | No | Avoid for MVP; use simple header handling in the new service unless a later feature requires richer metadata manipulation. |
+| `wavefile` | Useful for richer WAV parsing/writing, but not strictly required for the inspected implementation. | No | The inspected code uses a custom WAV parser that handles common cases but may be brittle with non-standard files. For improved robustness and to avoid future maintenance issues with complex WAV formats, replacing the custom parser with `wavefile` is strongly recommended, even for the MVP. |
 | Node built-ins (`fs`, `path`, `crypto`) | Folder scanning, temp files, hashing, and stream plumbing. | Yes | Use now; no new dependency needed. |
 | `buffer-crc32` | Not clearly required by the inspected pack core. | No | Avoid unless a checksum or integrity feature is explicitly planned. |
 | `7zip-bin` and 7z volume tooling | Needed only for 7z/volume-splitting strategy. | No | Exclude from MVP; treat as later-phase work only if the core proves this path is trivial to isolate. |
