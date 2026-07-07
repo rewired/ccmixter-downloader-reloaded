@@ -25,6 +25,7 @@ import { t } from '../i18n';
 
 import { resolveArtistCatalogCounts } from './catalogStatus';
 import { DownloadScreen } from './DownloadScreen';
+import { PackageRemixPlaceholder } from './PackageRemixPlaceholder';
 import { SourcePanel } from './SourcePanel';
 import { StatusBar } from './StatusBar';
 import { TechnicalDetails } from './TechnicalDetails';
@@ -34,6 +35,7 @@ export { resolveArtistCatalogStatus } from './catalogStatus';
 
 type Status = 'idle' | 'loading' | 'error';
 type AppScreen = 'review' | 'download';
+type ActiveTool = 'source' | 'package';
 
 const PLACEHOLDER_ROOT: StemLibraryRoot = {
   path: '',
@@ -53,6 +55,7 @@ export function App(): JSX.Element {
   const [downloadQueueState, setDownloadQueueState] = useState<DownloadQueueState | null>(null);
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
   const [screen, setScreen] = useState<AppScreen>('review');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('source');
   const [catalogSessionState, setCatalogSessionState] = useState<ArtistCatalogState | null>(null);
   const [catalogIsLoadingMore, setCatalogIsLoadingMore] = useState(false);
   const [artistScanRunning, setArtistScanRunning] = useState(false);
@@ -500,7 +503,7 @@ export function App(): JSX.Element {
   }, [listMode, selectedGroupId]);
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${activeTool === 'package' ? ' app-shell--no-status-bar' : ''}`}>
       <div className="workspace">
         <header className="app-header">
           <div>
@@ -510,6 +513,25 @@ export function App(): JSX.Element {
           <span className="version">v{appInfo?.version ?? '0.2.0'}</span>
         </header>
 
+        <div className="tool-switch" role="group" aria-label={t('app.toolSwitch.label')}>
+          <button
+            type="button"
+            className={`tool-switch__button${activeTool === 'source' ? ' selected' : ''}`}
+            aria-pressed={activeTool === 'source'}
+            onClick={() => setActiveTool('source')}
+          >
+            {t('app.tool.source')}
+          </button>
+          <button
+            type="button"
+            className={`tool-switch__button${activeTool === 'package' ? ' selected' : ''}`}
+            aria-pressed={activeTool === 'package'}
+            onClick={() => setActiveTool('package')}
+          >
+            {t('app.tool.package')}
+          </button>
+        </div>
+
         {error ? (
           <section className="error" role="alert">
             <strong>{error.message}</strong>
@@ -517,7 +539,9 @@ export function App(): JSX.Element {
           </section>
         ) : null}
 
-        {screen === 'download' && downloadJob ? (
+        {activeTool === 'package' ? (
+          <PackageRemixPlaceholder />
+        ) : screen === 'download' && downloadJob ? (
           <DownloadScreen
             job={downloadJob}
             queueState={downloadQueueState}
@@ -571,19 +595,21 @@ export function App(): JSX.Element {
         )}
       </div>
 
-      <StatusBar
-        stemLibraryRoot={stemLibraryRoot}
-        onChooseRoot={() => void chooseStemLibraryRoot()}
-        isArtistCatalog={isArtistCatalog}
-        catalogCounts={catalogCounts}
-        scanPhase={scanPhase}
-        plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
-        hasReviewSession={Boolean(reviewSession)}
-        downloadFileCount={downloadFileCount}
-        canDownload={canDownload}
-        isDownloading={Boolean(isDownloading)}
-        onDownload={() => void onDownloadClick()}
-      />
+      {activeTool === 'source' ? (
+        <StatusBar
+          stemLibraryRoot={stemLibraryRoot}
+          onChooseRoot={() => void chooseStemLibraryRoot()}
+          isArtistCatalog={isArtistCatalog}
+          catalogCounts={catalogCounts}
+          scanPhase={scanPhase}
+          plannedFileCount={reviewedDryRunPlan?.plannedFiles.length ?? 0}
+          hasReviewSession={Boolean(reviewSession)}
+          downloadFileCount={downloadFileCount}
+          canDownload={canDownload}
+          isDownloading={Boolean(isDownloading)}
+          onDownload={() => void onDownloadClick()}
+        />
+      ) : null}
     </main>
   );
 }

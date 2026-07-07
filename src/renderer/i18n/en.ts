@@ -1,5 +1,11 @@
 export const en = {
   'app.eyebrow': 'Batch downloader',
+  'app.tool.source': 'Get Source Material',
+  'app.tool.package': 'Package Remix',
+  'app.toolSwitch.label': 'Tool',
+  'packageRemix.title': 'Package Remix',
+  'packageRemix.description': 'Create upload-ready stem ZIP packages from your own local remix exports.',
+  'packageRemix.comingSoon': 'Folder scanning, metadata, attribution, and stereo WAV splitting will be added in a later slice.',
   'source.title': 'Source',
   'source.inputLabel': 'ccMixter artist or upload',
   'source.placeholder': 'Paste an artist name, artist link, upload link, or upload ID',
