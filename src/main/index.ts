@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, net, type OpenDialogOptions } from 'electron';
 import path from 'path';
 
 import {
@@ -163,6 +163,13 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   createWindow();
 
+  globalShortcut.register('F12', () => {
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    if (focusedWindow) {
+      focusedWindow.webContents.toggleDevTools();
+    }
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -174,6 +181,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 function registerIpcHandlers(): void {
@@ -407,7 +418,7 @@ function getE2EStemLibraryRootPath(): string | null {
 }
 
 function shouldOpenDevTools(): boolean {
-  return !app.isPackaged && process.env.CCMIXTER_OPEN_DEVTOOLS === '1';
+  return !app.isPackaged;
 }
 
 function isValidFolderPath(folderPath: string): boolean {
