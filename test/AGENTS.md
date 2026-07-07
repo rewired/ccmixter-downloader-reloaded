@@ -32,4 +32,4 @@ This subtree contains Vitest tests, Playwright Electron smoke tests, and fixture
 
 * `fixtures/AGENTS.md` covers reusable fixture data.
 * `e2e/AGENTS.md` covers Playwright Electron smoke tests.
-* Domain-specific test folders such as `archive/`, `ccmixter/`, `download/`, `grouping/`, `renderer/`, and `review/` remain owned by this file.
+* Domain-specific test folders such as `archive/`, `ccmixter/`, `download/`, `grouping/`, `renderer/`, `review/`, and `stem-packing/` remain owned by this file.

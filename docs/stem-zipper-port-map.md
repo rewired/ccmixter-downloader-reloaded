@@ -280,6 +280,8 @@ Package Remix is a placeholder only.
 
 Port the Stem Packing core into [src/main/services/stemPacking/](src/main/services/stemPacking/) with no renderer UI and no IPC beyond tests if needed.
 
+**Status: implemented.** See [docs/adr/0002-stem-packing-engine.md](adr/0002-stem-packing-engine.md) for the concrete engine contract, dependency choices, and scope deviations from this port map (no progress reporting, no per-extension zip grouping, license/attribution as explicit user-provided strings rather than a closed CC enum).
+
 ### Slice 3
 
 Add a narrow IPC/preload contract for folder preview and pack start.

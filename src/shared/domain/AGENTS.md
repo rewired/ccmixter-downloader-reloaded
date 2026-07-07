@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This subtree contains shared domain models for ccMixter uploads, licenses, archive data, downloads, grouping, review, planning, and classification.
+This subtree contains shared domain models for ccMixter uploads, licenses, archive data, downloads, grouping, review, planning, classification, and local stem packing (Package Remix).
 
 ## Ownership
 
