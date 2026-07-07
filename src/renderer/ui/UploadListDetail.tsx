@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   renameArtist,
@@ -15,6 +15,7 @@ import {
 import { t } from '../i18n';
 
 import { LicenseBadge } from './LicenseBadge';
+import { PreviewPlayer } from './PreviewPlayer';
 
 export interface UploadRow {
   id: string;
@@ -70,6 +71,7 @@ export function UploadListDetail({
   noFilesFoundUploads: ArtistCatalogUploadCheck[];
   couldNotCheckFilesUploads: ArtistCatalogUploadCheck[];
 }): JSX.Element {
+  const [activePreviewFileId, setActivePreviewFileId] = useState<string | null>(null);
   const rows = useMemo(
     () =>
       (mode.kind === 'review' ? mode.reviewSession.groups.map(toReviewRow) : mode.groups.map(toRawRow)).filter(
@@ -81,6 +83,10 @@ export function UploadListDetail({
   const selectedReviewGroup =
     mode.kind === 'review' ? mode.reviewSession.groups.find((group) => group.reviewGroupId === selectedGroupId) ?? null : null;
   const selectedRawGroup = mode.kind === 'raw' ? mode.groups.find((group) => group.groupId === selectedGroupId) ?? null : null;
+
+  useEffect(() => {
+    setActivePreviewFileId(null);
+  }, [selectedGroupId]);
 
   return (
     <div className="upload-list-detail">
@@ -126,12 +132,24 @@ export function UploadListDetail({
 
       {mode.kind === 'review' ? (
         selectedReviewGroup ? (
-          <ReviewGroupDetail reviewSession={mode.reviewSession} group={selectedReviewGroup} onChange={mode.onChange} />
+          <ReviewGroupDetail
+            reviewSession={mode.reviewSession}
+            group={selectedReviewGroup}
+            activePreviewFileId={activePreviewFileId}
+            onPreviewActivate={setActivePreviewFileId}
+            onPreviewDeactivate={() => setActivePreviewFileId(null)}
+            onChange={mode.onChange}
+          />
         ) : (
           <p className="empty">{t('review.selectSong')}</p>
         )
       ) : selectedRawGroup ? (
-        <RawGroupDetail group={selectedRawGroup} />
+        <RawGroupDetail
+          group={selectedRawGroup}
+          activePreviewFileId={activePreviewFileId}
+          onPreviewActivate={setActivePreviewFileId}
+          onPreviewDeactivate={() => setActivePreviewFileId(null)}
+        />
       ) : (
         <p className="empty">{t('review.selectSong')}</p>
       )}
@@ -150,10 +168,16 @@ function formatFileCountLabel(row: UploadRow): string {
 function ReviewGroupDetail({
   reviewSession,
   group,
+  activePreviewFileId,
+  onPreviewActivate,
+  onPreviewDeactivate,
   onChange
 }: {
   reviewSession: ReviewSession;
   group: ReviewGroup;
+  activePreviewFileId: string | null;
+  onPreviewActivate: (fileId: string) => void;
+  onPreviewDeactivate: () => void;
   onChange: (session: ReviewSession) => void;
 }): JSX.Element {
   const firstUpload = group.originalGroup.uploads[0];
@@ -209,6 +233,12 @@ function ReviewGroupDetail({
                   type="checkbox"
                   aria-label={`Include ${file.originalFilename}`}
                 />
+                <PreviewPlayer
+                  file={file.originalFile}
+                  isActive={activePreviewFileId === file.fileId}
+                  onActivate={() => onPreviewActivate(file.fileId)}
+                  onDeactivate={onPreviewDeactivate}
+                />
                 <input
                   className="inline-edit file-name-input"
                   value={baseName}
@@ -249,7 +279,17 @@ function composeFilename(baseName: string, extension: string): string {
   return extension ? `${baseName}.${extension}` : baseName;
 }
 
-function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
+function RawGroupDetail({
+  group,
+  activePreviewFileId,
+  onPreviewActivate,
+  onPreviewDeactivate
+}: {
+  group: StemGroup;
+  activePreviewFileId: string | null;
+  onPreviewActivate: (fileId: string) => void;
+  onPreviewDeactivate: () => void;
+}): JSX.Element {
   const firstUpload = group.uploads[0];
 
   return (
@@ -266,15 +306,25 @@ function RawGroupDetail({ group }: { group: StemGroup }): JSX.Element {
       </div>
 
       <ul className="candidate-list file-list">
-        {group.files.map((file) => (
-          <li key={`${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}`} data-filename={file.originalFilename}>
-            <div className="file-row file-row--main">
-              <span>{file.displayLabel ?? file.originalFilename}</span>
-              {file.extension ? <span className="file-rename-ext">.{file.extension}</span> : null}
-            </div>
-            <ArchiveDisclosure file={file} />
-          </li>
-        ))}
+        {group.files.map((file, index) => {
+          const fileId = `${file.originalFilename}-${file.downloadUrl ?? file.metadataSource}-${index}`;
+
+          return (
+            <li key={fileId} data-filename={file.originalFilename}>
+              <div className="file-row file-row--main">
+                <PreviewPlayer
+                  file={file}
+                  isActive={activePreviewFileId === fileId}
+                  onActivate={() => onPreviewActivate(fileId)}
+                  onDeactivate={onPreviewDeactivate}
+                />
+                <span>{file.displayLabel ?? file.originalFilename}</span>
+                {file.extension ? <span className="file-rename-ext">.{file.extension}</span> : null}
+              </div>
+              <ArchiveDisclosure file={file} />
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

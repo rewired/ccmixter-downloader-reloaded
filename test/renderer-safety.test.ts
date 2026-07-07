@@ -31,6 +31,14 @@ describe('renderer safety', () => {
     expect(violations).toEqual([]);
   });
 
+  it('does not inject remote WaveSurfer scripts into the renderer', async () => {
+    const source = await readAllRendererSource();
+
+    expect(source).not.toContain('wavesurfer.xyz');
+    expect(source).not.toContain('createElement("script")');
+    expect(source).not.toContain("createElement('script')");
+  });
+
   it('renders musician-facing artist scan progress and counts from shared renderer state', async () => {
     const source = await readAllRendererSource();
 

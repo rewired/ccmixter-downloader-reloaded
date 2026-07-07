@@ -189,7 +189,9 @@ describe('review session overrides', () => {
   });
 
   it('applies candidate review actions explicitly', () => {
-    const cleared = clearIncludedDownloadCandidates(createReviewSessionFromDryRunPlan(createPlan()));
+    const session = createReviewSessionFromDryRunPlan(createPlan());
+    const selected = toggleFileIncluded(toggleFileIncluded(session, session.groups[0]!.files[0]!.fileId), session.groups[1]!.files[0]!.fileId);
+    const cleared = clearIncludedDownloadCandidates(selected);
     const recommended = includeRecommendedDownloadCandidates(createReviewSessionFromDryRunPlan(createPlan()));
     const withoutPreviews = excludePreviewDownloadCandidates(includeRecommendedDownloadCandidates(createReviewSessionFromDryRunPlan(createPlan())));
     const withoutArchives = excludeArchiveDownloadCandidates(
@@ -197,6 +199,7 @@ describe('review session overrides', () => {
     );
 
     expect(cleared.groups[0]?.files.map((file) => file.included)).toEqual([false, false]);
+    expect(cleared.groups[1]?.files.map((file) => file.included)).toEqual([false]);
     expect(recommended.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);
     expect(recommended.groups[1]?.files.map((file) => file.included)).toEqual([true]);
     expect(withoutPreviews.groups[0]?.files.map((file) => file.included)).toEqual([true, false]);

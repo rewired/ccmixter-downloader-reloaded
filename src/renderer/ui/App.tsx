@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildReviewedDryRunPlan,
+  clearIncludedDownloadCandidates,
   createDryRunPlanFromGroups,
   createReviewSessionFromDryRunPlan,
   isArtistCatalogInput,
@@ -48,6 +49,7 @@ export function App(): JSX.Element {
   const [dryRunPlan, setDryRunPlan] = useState<DryRunPlan | null>(null);
   const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null);
   const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
+  const [downloadSongCount, setDownloadSongCount] = useState(0);
   const [downloadQueueState, setDownloadQueueState] = useState<DownloadQueueState | null>(null);
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
   const [screen, setScreen] = useState<AppScreen>('review');
@@ -396,7 +398,7 @@ export function App(): JSX.Element {
       }
 
       const attemptedAnyFile = startResult.value.files.some(
-        (file) => file.status === 'running' || file.status === 'completed' || file.status === 'failed'
+        (file) => file.status === 'running' || file.status === 'completed' || file.status === 'failed' || file.status === 'cancelled'
       );
 
       if (startResult.value.status === 'failed' && !attemptedAnyFile && startResult.value.errors.length > 0) {
@@ -405,8 +407,12 @@ export function App(): JSX.Element {
         return;
       }
 
+      setDownloadSongCount(songCount);
       setDownloadJob(jobResult.value);
       setDownloadQueueState(startResult.value);
+      if (attemptedAnyFile && isTerminalDownloadStatus(startResult.value.status)) {
+        setReviewSession((currentSession) => (currentSession ? clearIncludedDownloadCandidates(currentSession) : currentSession));
+      }
       setStatus('idle');
       setScreen('download');
     } catch (downloadError) {
@@ -441,6 +447,7 @@ export function App(): JSX.Element {
 
   function resetDownloadState(): void {
     setDownloadJob(null);
+    setDownloadSongCount(0);
     setDownloadQueueState(null);
     setDownloadResult(null);
     setScreen('review');
@@ -515,7 +522,7 @@ export function App(): JSX.Element {
             job={downloadJob}
             queueState={downloadQueueState}
             result={downloadResult}
-            songCount={songCount}
+            songCount={downloadSongCount}
             onCancel={(jobId) => void cancelDownloadJob(jobId)}
             onBackToReview={backToReview}
           />
@@ -687,4 +694,8 @@ function toAppError(error: unknown): AppError {
 
 function unique<T>(value: T, index: number, all: T[]): boolean {
   return all.indexOf(value) === index;
+}
+
+function isTerminalDownloadStatus(status: DownloadQueueState['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
