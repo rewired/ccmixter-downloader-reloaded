@@ -1,6 +1,6 @@
 {
   "name": "ccmixter-stem-downloader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Electron foundation for planning ccMixter stem library downloads.",
   "main": ".webpack/main",
   "private": true,

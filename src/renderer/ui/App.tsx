@@ -500,7 +500,7 @@ export function App(): JSX.Element {
             <p className="eyebrow">{t('app.eyebrow')}</p>
             <h1>{appInfo?.name ?? 'ccMixter Stem Downloader'}</h1>
           </div>
-          <span className="version">v{appInfo?.version ?? '0.1.0'}</span>
+          <span className="version">v{appInfo?.version ?? '0.2.0'}</span>
         </header>
 
         {error ? (
